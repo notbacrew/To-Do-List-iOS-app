@@ -25,7 +25,7 @@ struct ContentView: View {
                             .font(.system(size: 80, weight: .black, design: .serif))
                             .foregroundColor(Color(.systemBackground))
                     }
-                    Text(isEnglish ? "Welcome to To-Do List!" : "Добро пожаловать в To-Do List!")
+                    Text(isEnglish ? "Welcome to To-Do List!" : "Добро пожаловать в To-Do!")
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .foregroundColor(.primary)
