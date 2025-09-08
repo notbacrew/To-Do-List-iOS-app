@@ -46,9 +46,10 @@ struct ContentView: View {
                     }) {
                         HStack {
                             Image(systemName: "globe")
+                                .fontWeight(.bold)
                                 .foregroundColor(.blue)
                             Text(isEnglish ? "Change Language" : "Сменить язык")
-                                .font(.subheadline)
+                                .fontWeight(.heavy)
                                 .foregroundColor(.blue)
                         }
                         .padding(.bottom, 8)

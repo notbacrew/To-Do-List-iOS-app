@@ -85,11 +85,8 @@ extension String {
             "Edit": "Редактировать",
             "Delete": "Удалить",
             "Reset": "Сбросить",
-            "Light": "Светлая",
-            "Dark": "Тёмная",
-            "System": "Системная",
             "English": "Английский",
-            "Русский": "Русский",
+            "Russian": "Русский",
             "12-hour": "12-часовой",
             "24-hour": "24-часовой",
             "Short": "Короткий",
@@ -102,7 +99,11 @@ extension String {
             "Subtle": "Тонкий",
             "Linear": "Линейный",
             "Circular": "Круговой",
-            "Animated": "Анимированный"
+            "Animated": "Анимированный",
+            "Dark": "Тёмная",
+            "Light": "Светлая",
+            "System": "Системная"
+            
         ]
     }
 }
@@ -180,6 +181,8 @@ enum NotificationSound: String, CaseIterable {
     }
 }
 
+// ProgressBarStyle is defined in MainPage.swift
+
 // MARK: - Settings Manager
 
 class SettingsManager: ObservableObject {
@@ -228,8 +231,26 @@ class SettingsManager: ObservableObject {
         }
         
         notificationsEnabled = UserDefaults.standard.bool(forKey: "notificationsEnabled")
+        
+        if let notificationSoundRaw = UserDefaults.standard.string(forKey: "notificationSound"),
+           let sound = NotificationSound(rawValue: notificationSoundRaw) {
+            self.notificationSound = sound
+        }
+        
         autoCreateRecurring = UserDefaults.standard.bool(forKey: "autoCreateRecurring")
-        fontSize = UserDefaults.standard.double(forKey: "fontSize")
+        
+        let savedFontSize = UserDefaults.standard.double(forKey: "fontSize")
+        if savedFontSize > 0 {
+            fontSize = savedFontSize
+        } else {
+            fontSize = 16.0
+        }
+        
+        if let progressBarStyleRaw = UserDefaults.standard.string(forKey: "progressBarStyle"),
+           let style = ProgressBarStyle(rawValue: progressBarStyleRaw) {
+            self.progressBarStyle = style
+        }
+        
         animationsEnabled = UserDefaults.standard.bool(forKey: "animationsEnabled")
         iCloudSync = UserDefaults.standard.bool(forKey: "iCloudSync")
     }
@@ -262,8 +283,10 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.set(timeFormat.rawValue, forKey: "timeFormat")
         UserDefaults.standard.set(dateFormat.rawValue, forKey: "dateFormat")
         UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled")
+        UserDefaults.standard.set(notificationSound.rawValue, forKey: "notificationSound")
         UserDefaults.standard.set(autoCreateRecurring, forKey: "autoCreateRecurring")
         UserDefaults.standard.set(fontSize, forKey: "fontSize")
+        UserDefaults.standard.set(progressBarStyle.rawValue, forKey: "progressBarStyle")
         UserDefaults.standard.set(animationsEnabled, forKey: "animationsEnabled")
         UserDefaults.standard.set(iCloudSync, forKey: "iCloudSync")
         
@@ -368,18 +391,20 @@ struct SettingsView: View {
     @State private var showingExportSheet = false
     @State private var showingResetAlert = false
     
+    private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
+    
     var body: some View {
         NavigationView {
             List {
                 // MARK: - Appearance & Language
-                Section(header: Text(.appearanceAndLanguage)) {
+                Section(header: Text(t("Appearance & Language"))) {
                     // Theme
                     HStack {
                         Image(systemName: "paintbrush")
                             .foregroundColor(.blue)
                             .frame(width: 24)
                         
-                        Text(.theme)
+                        Text(t("Theme"))
                         
                         Spacer()
                         
@@ -400,7 +425,7 @@ struct SettingsView: View {
                             .foregroundColor(.green)
                             .frame(width: 24)
                         
-                        Text(.language)
+                        Text(t("Language"))
                         
                         Spacer()
                         
@@ -420,8 +445,7 @@ struct SettingsView: View {
                         Image(systemName: "clock")
                             .foregroundColor(.orange)
                             .frame(width: 24)
-                        
-                        Text(.timeFormat)
+                    
                         
                         Spacer()
                         
@@ -442,7 +466,6 @@ struct SettingsView: View {
                             .foregroundColor(.purple)
                             .frame(width: 24)
                         
-                        Text(.dateFormat)
                         
                         Spacer()
                         
@@ -459,14 +482,17 @@ struct SettingsView: View {
                 }
                 
                 // MARK: - Tasks & Notifications
-                Section(header: Text("Tasks & Notifications")) {
+                Section(header: Text(t("Tasks & Notifications"))) {
                     // Notifications
                     HStack {
                         Image(systemName: "bell")
                             .foregroundColor(.red)
                             .frame(width: 24)
                         
-                        Toggle("Push Notifications", isOn: $settingsManager.notificationsEnabled)
+                        Toggle(t("Push Notifications"), isOn: $settingsManager.notificationsEnabled)
+                            .onChange(of: settingsManager.notificationsEnabled) { _ in
+                                settingsManager.saveSettings()
+                            }
                     }
                     
                     // Notification Sound
@@ -476,7 +502,7 @@ struct SettingsView: View {
                                 .foregroundColor(.blue)
                                 .frame(width: 24)
                             
-                            Text("Notification Sound")
+                            Text(t("Notification Sound"))
                             
                             Spacer()
                             
@@ -486,6 +512,9 @@ struct SettingsView: View {
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
+                            .onChange(of: settingsManager.notificationSound) { _ in
+                                settingsManager.saveSettings()
+                            }
                         }
                     }
                     
@@ -495,7 +524,10 @@ struct SettingsView: View {
                             .foregroundColor(.green)
                             .frame(width: 24)
                         
-                        Toggle("Auto Create Recurring Tasks", isOn: $settingsManager.autoCreateRecurring)
+                        Toggle(t("Auto Create Recurring Tasks"), isOn: $settingsManager.autoCreateRecurring)
+                            .onChange(of: settingsManager.autoCreateRecurring) { _ in
+                                settingsManager.saveSettings()
+                            }
                     }
                     
                     // Reset Statistics
@@ -507,7 +539,7 @@ struct SettingsView: View {
                                 .foregroundColor(.orange)
                                 .frame(width: 24)
                             
-                            Text("Reset Statistics")
+                            Text(t("Reset Statistics"))
                                 .foregroundColor(.primary)
                             
                             Spacer()
@@ -516,7 +548,7 @@ struct SettingsView: View {
                 }
                 
                 // MARK: - Categories & Organization
-                Section(header: Text("Categories & Organization")) {
+                Section(header: Text(t("Categories & Organization"))) {
                     // Manage Categories
                     Button(action: {
                         showingCategoryEditor = true
@@ -526,7 +558,7 @@ struct SettingsView: View {
                                 .foregroundColor(.blue)
                                 .frame(width: 24)
                             
-                            Text("Manage Categories")
+                            Text(t("Manage Categories"))
                                 .foregroundColor(.primary)
                             
                             Spacer()
@@ -546,7 +578,7 @@ struct SettingsView: View {
                                 .foregroundColor(.green)
                                 .frame(width: 24)
                             
-                            Text("Task Templates")
+                            Text(t("Task Templates"))
                                 .foregroundColor(.primary)
                             
                             Spacer()
@@ -559,7 +591,7 @@ struct SettingsView: View {
                 }
                 
                 // MARK: - Visual Settings
-                Section(header: Text("Visual Settings")) {
+                Section(header: Text(t("Visual Settings"))) {
                     // Font Size
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -567,7 +599,7 @@ struct SettingsView: View {
                                 .foregroundColor(.purple)
                                 .frame(width: 24)
                             
-                            Text("Font Size")
+                            Text(t("Font Size"))
                             
                             Spacer()
                             
@@ -577,6 +609,9 @@ struct SettingsView: View {
                         
                         Slider(value: $settingsManager.fontSize, in: 12...24, step: 1)
                             .padding(.leading, 28)
+                            .onChange(of: settingsManager.fontSize) { _ in
+                                settingsManager.saveSettings()
+                            }
                     }
                     
                     // Progress Bar Style
@@ -585,16 +620,19 @@ struct SettingsView: View {
                             .foregroundColor(.blue)
                             .frame(width: 24)
                         
-                        Text("Progress Bar Style")
+                        Text(t("Progress Bar Style"))
                         
                         Spacer()
                         
-                        Picker("Style", selection: $settingsManager.progressBarStyle) {
+                        Picker("", selection: $settingsManager.progressBarStyle) {
                             ForEach(ProgressBarStyle.allCases, id: \.self) { style in
                                 Text(style.localizedName).tag(style)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
+                        .onChange(of: settingsManager.progressBarStyle) { _ in
+                            settingsManager.saveSettings()
+                        }
                     }
                     
                     // Animations
@@ -603,19 +641,25 @@ struct SettingsView: View {
                             .foregroundColor(.yellow)
                             .frame(width: 24)
                         
-                        Toggle("Enable Animations", isOn: $settingsManager.animationsEnabled)
+                        Toggle(t("Enable Animations"), isOn: $settingsManager.animationsEnabled)
+                            .onChange(of: settingsManager.animationsEnabled) { _ in
+                                settingsManager.saveSettings()
+                            }
                     }
                 }
                 
                 // MARK: - Export & Backup
-                Section(header: Text("Export & Backup")) {
+                Section(header: Text(t("Export & Backup"))) {
                     // iCloud Sync
                     HStack {
                         Image(systemName: "icloud")
                             .foregroundColor(.blue)
                             .frame(width: 24)
                         
-                        Toggle("iCloud Sync", isOn: $settingsManager.iCloudSync)
+                        Toggle(t("iCloud Sync"), isOn: $settingsManager.iCloudSync)
+                            .onChange(of: settingsManager.iCloudSync) { _ in
+                                settingsManager.saveSettings()
+                            }
                     }
                     
                     // Export Tasks
@@ -627,7 +671,7 @@ struct SettingsView: View {
                                 .foregroundColor(.green)
                                 .frame(width: 24)
                             
-                            Text("Export Tasks")
+                            Text(t("Export Tasks"))
                                 .foregroundColor(.primary)
                             
                             Spacer()
@@ -639,11 +683,11 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Settings")
+            .navigationTitle(t("Settings"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
+                    Button(t("Done")) {
                         settingsManager.saveSettings()
                         dismiss()
                     }

@@ -172,6 +172,8 @@ struct MainPageView: View {
     // Settings state
     @State private var showingSettings = false
 
+    private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .leading) {
@@ -439,6 +441,7 @@ struct MainPageView: View {
                     showingCreateTaskSheet = false
                 }
             )
+            .environmentObject(settingsManager)
         }
         .sheet(isPresented: $showingEditTaskSheet) {
             if let taskToEdit = selectedTask {
@@ -477,6 +480,7 @@ struct MainPageView: View {
                         showingEditTaskSheet = false
                     }
                 )
+                .environmentObject(settingsManager)
             }
         }
         .confirmationDialog("Task Options", isPresented: $showingTaskMenu, titleVisibility: .visible, presenting: selectedTask) { task in
@@ -523,7 +527,7 @@ struct MainPageView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
                             // "Sort by" label
-                            Text("Sort by")
+                            Text(t("Sort by"))
                                 .font(.caption)
                                 .foregroundColor(.gray)
                                 .padding(.top, 32)
@@ -579,7 +583,7 @@ struct MainPageView: View {
                                 }) {
                                     HStack {
                                         Image(systemName: "plus")
-                                        Text("Add")
+                                        Text(t("Add"))
                                             .fontWeight(.semibold)
                                     }
                                 }
@@ -599,7 +603,7 @@ struct MainPageView: View {
                                 showingSettings = true
                             }
                         }) {
-                            Text("Settings")
+                            Text(t("Settings"))
                                 .foregroundColor(.primary)
                                 .font(.headline)
                                 .padding(.horizontal, 6)
@@ -1350,6 +1354,10 @@ struct CreateTaskView: View {
     var onCreate: (String, Date?, String, RecurrenceType, [Subtask], [TaskAttachment], TimeSlot?, Bool, Date?) -> Void
     var onCancel: () -> Void
 
+    @EnvironmentObject var settingsManager: SettingsManager
+
+    private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
+
     @State private var title: String = ""
     @State private var deadlineEnabled: Bool = false
     @State private var deadline: Date = Date()
@@ -1373,6 +1381,8 @@ struct CreateTaskView: View {
     @State private var notificationTime: Date = Date()
 
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusTitle: Bool
+    @FocusState private var focusSubtask: Bool
 
     init(categories: [String], initialTitle: String = "", initialDeadline: Date? = nil, initialCategory: String? = nil, initialRecurrence: RecurrenceType = .none, initialSubtasks: [Subtask] = [], initialAttachments: [TaskAttachment] = [], initialTimeSlot: TimeSlot? = nil, initialHasNotification: Bool = false, initialNotificationTime: Date? = nil, onCreate: @escaping (String, Date?, String, RecurrenceType, [Subtask], [TaskAttachment], TimeSlot?, Bool, Date?) -> Void, onCancel: @escaping () -> Void) {
         self.categories = categories
@@ -1416,20 +1426,23 @@ struct CreateTaskView: View {
         NavigationView {
             VStack(spacing: 0) {
                 Form {
-                    Section(header: Text("Task Title")) {
-                        TextField("Enter title", text: $title)
+                    Section(header: Text(t("Task Title"))) {
+                        TextField(t("Enter title"), text: $title)
+                            .focused($focusTitle)
+                            .textInputAutocapitalization(.sentences)
+                            .disableAutocorrection(false)
                     }
                     
-                    Section(header: Text("Deadline")) {
-                        Toggle("Set Deadline", isOn: $deadlineEnabled)
+                    Section(header: Text(t("Deadline"))) {
+                        Toggle(t("Set Deadline"), isOn: $deadlineEnabled)
                         if deadlineEnabled {
-                            DatePicker("Deadline", selection: $deadline, displayedComponents: [.date, .hourAndMinute])
+                            DatePicker(t("Deadline"), selection: $deadline, displayedComponents: [.date, .hourAndMinute])
                                 .datePickerStyle(GraphicalDatePickerStyle())
                         }
                     }
                     
-                    Section(header: Text("Recurrence")) {
-                        Picker("Repeat", selection: $selectedRecurrence) {
+                    Section(header: Text(t("Recurrence"))) {
+                        Picker(t("Repeat"), selection: $selectedRecurrence) {
                             ForEach(RecurrenceType.allCases, id: \.self) { type in
                                 Text(type.rawValue).tag(type)
                             }
@@ -1437,7 +1450,7 @@ struct CreateTaskView: View {
                         .pickerStyle(SegmentedPickerStyle())
                     }
                     
-                    Section(header: Text("Category")) {
+                    Section(header: Text(t("Category"))) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
                                 ForEach(categories, id: \.self) { cat in
@@ -1460,7 +1473,7 @@ struct CreateTaskView: View {
                         }
                     }
                     
-                    Section(header: Text("Subtasks")) {
+                    Section(header: Text(t("Subtasks"))) {
                         ForEach(subtasks) { subtask in
                             HStack {
                                 Button(action: {
@@ -1490,40 +1503,41 @@ struct CreateTaskView: View {
                         }
                         
                         HStack {
-                            TextField("Add subtask", text: $newSubtaskTitle)
+                            TextField(t("Add subtask"), text: $newSubtaskTitle)
+                                .focused($focusSubtask)
                                 .onSubmit {
                                     addSubtask()
                                 }
                             
-                            Button("Add") {
+                            Button(t("Add")) {
                                 addSubtask()
                             }
                             .disabled(newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
                     
-                    Section(header: Text("Time Blocking")) {
-                        Toggle("Schedule Specific Time", isOn: $timeSlotEnabled)
+                    Section(header: Text(t("Time Blocking"))) {
+                        Toggle(t("Schedule Specific Time"), isOn: $timeSlotEnabled)
                         
                         if timeSlotEnabled {
-                            Toggle("All Day", isOn: $isAllDay)
+                            Toggle(t("All Day"), isOn: $isAllDay)
                             
                             if !isAllDay {
-                                DatePicker("Start Time", selection: $startTime, displayedComponents: [.hourAndMinute])
-                                DatePicker("End Time", selection: $endTime, displayedComponents: [.hourAndMinute])
+                                DatePicker(t("Start Time"), selection: $startTime, displayedComponents: [.hourAndMinute])
+                                DatePicker(t("End Time"), selection: $endTime, displayedComponents: [.hourAndMinute])
                             }
                         }
                     }
                     
-                    Section(header: Text("Notifications")) {
-                        Toggle("Enable Notification", isOn: $hasNotification)
+                    Section(header: Text(t("Notifications"))) {
+                        Toggle(t("Enable Notification"), isOn: $hasNotification)
                         
                         if hasNotification {
-                            DatePicker("Remind me at", selection: $notificationTime, displayedComponents: [.date, .hourAndMinute])
+                            DatePicker(t("Remind me at"), selection: $notificationTime, displayedComponents: [.date, .hourAndMinute])
                         }
                     }
                     
-                    Section(header: Text("Attachments")) {
+                    Section(header: Text(t("Attachments"))) {
                         ForEach(attachments) { attachment in
                             HStack {
                                 Image(systemName: attachment.type.icon)
@@ -1556,7 +1570,7 @@ struct CreateTaskView: View {
                         }) {
                             HStack {
                                 Image(systemName: "plus")
-                                Text("Add Attachment")
+                                Text(t("Add Attachment"))
                             }
                         }
                     }
@@ -1568,7 +1582,7 @@ struct CreateTaskView: View {
                     let notificationTimeToSend: Date? = hasNotification ? notificationTime : nil
                     onCreate(title, deadlineToSend, selectedCategory, selectedRecurrence, subtasks, attachments, timeSlotToSend, hasNotification, notificationTimeToSend)
                 }) {
-                    Text("Create")
+                    Text(t("Create"))
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -1580,8 +1594,8 @@ struct CreateTaskView: View {
                 }
                 .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            .navigationBarTitle("Create Task", displayMode: .inline)
-            .navigationBarItems(leading: Button("Cancel") {
+            .navigationBarTitle(t("Create Task"), displayMode: .inline)
+            .navigationBarItems(leading: Button(t("Cancel")) {
                 onCancel()
             })
             .sheet(isPresented: $showingAttachmentSheet) {
@@ -1594,6 +1608,12 @@ struct CreateTaskView: View {
                         newAttachmentContent = ""
                     }
                 )
+            }
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                focusTitle = true
+                focusSubtask = false
             }
         }
     }
