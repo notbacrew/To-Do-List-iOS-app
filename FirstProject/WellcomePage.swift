@@ -56,9 +56,11 @@ struct ContentView: View {
                     }
                 }
             }
-            .navigationDestination(isPresented: $showMainPage) {
+            // Use a hidden NavigationLink to navigate programmatically
+            NavigationLink("", isActive: $showMainPage) {
                 MainPageView()
             }
+            .hidden()
         }
     }
 }

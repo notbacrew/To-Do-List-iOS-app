@@ -297,8 +297,9 @@ struct MainPageView: View {
                 }
 
                 if showMenu {
-                    Color.black.opacity(0.3)
+                    Color.black.opacity(showMenu ? 0.3 : 0)
                         .ignoresSafeArea()
+                        .allowsHitTesting(showMenu)
                         .onTapGesture {
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
                                 showMenu = false
@@ -1355,34 +1356,27 @@ struct CreateTaskView: View {
     var onCancel: () -> Void
 
     @EnvironmentObject var settingsManager: SettingsManager
+    @Environment(\.dismiss) private var dismiss
 
-    private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
-
-    @State private var title: String = ""
+    @State private var title: String
     @State private var deadlineEnabled: Bool = false
     @State private var deadline: Date = Date()
-    @State private var selectedCategory: String = ""
-    @State private var selectedRecurrence: RecurrenceType = .none
-    @State private var subtasks: [Subtask] = []
-    @State private var attachments: [TaskAttachment] = []
+    @State private var selectedCategory: String
+    @State private var selectedRecurrence: RecurrenceType
+    @State private var subtasks: [Subtask]
+    @State private var attachments: [TaskAttachment]
     @State private var newSubtaskTitle: String = ""
     @State private var newAttachmentContent: String = ""
     @State private var newAttachmentType: AttachmentType = .link
     @State private var showingAttachmentSheet = false
-    
-    // Time blocking state
     @State private var timeSlotEnabled: Bool = false
     @State private var startTime: Date = Date()
     @State private var endTime: Date = Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
     @State private var isAllDay: Bool = false
-    
-    // Notification state
-    @State private var hasNotification: Bool = false
-    @State private var notificationTime: Date = Date()
-
-    @Environment(\.dismiss) private var dismiss
+    @State private var hasNotification: Bool
+    @State private var notificationTime: Date
+    @State private var showTitleError: Bool = false
     @FocusState private var focusTitle: Bool
-    @FocusState private var focusSubtask: Bool
 
     init(categories: [String], initialTitle: String = "", initialDeadline: Date? = nil, initialCategory: String? = nil, initialRecurrence: RecurrenceType = .none, initialSubtasks: [Subtask] = [], initialAttachments: [TaskAttachment] = [], initialTimeSlot: TimeSlot? = nil, initialHasNotification: Bool = false, initialNotificationTime: Date? = nil, onCreate: @escaping (String, Date?, String, RecurrenceType, [Subtask], [TaskAttachment], TimeSlot?, Bool, Date?) -> Void, onCancel: @escaping () -> Void) {
         self.categories = categories
@@ -1419,19 +1413,24 @@ struct CreateTaskView: View {
             _selectedCategory = State(initialValue: cat)
         } else if let first = categories.first {
             _selectedCategory = State(initialValue: first)
+        } else {
+            _selectedCategory = State(initialValue: "")
         }
     }
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                Form {
-                    Section(header: Text(t("Task Title"))) {
-                        TextField(t("Enter title"), text: $title)
-                            .focused($focusTitle)
-                            .textInputAutocapitalization(.sentences)
-                            .disableAutocorrection(false)
+        NavigationStack {
+            Form {
+                Section(header: Text("Task Title")) {
+                    TextField("Enter title", text: $title)
+                        .focused($focusTitle)
+                        .border(Color.gray) // Added for visibility
+                    if showTitleError && title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Title is required")
+                            .font(.caption)
+                            .foregroundColor(.red)
                     }
+                }
                     
                     Section(header: Text(t("Deadline"))) {
                         Toggle(t("Set Deadline"), isOn: $deadlineEnabled)
@@ -1577,10 +1576,16 @@ struct CreateTaskView: View {
                 }
                 
                 Button(action: {
+                    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else {
+                        showTitleError = true
+                        focusTitle = true
+                        return
+                    }
                     let deadlineToSend: Date? = deadlineEnabled ? deadline : nil
                     let timeSlotToSend: TimeSlot? = timeSlotEnabled ? TimeSlot(startTime: startTime, endTime: endTime, isAllDay: isAllDay) : nil
                     let notificationTimeToSend: Date? = hasNotification ? notificationTime : nil
-                    onCreate(title, deadlineToSend, selectedCategory, selectedRecurrence, subtasks, attachments, timeSlotToSend, hasNotification, notificationTimeToSend)
+                    onCreate(trimmed, deadlineToSend, selectedCategory, selectedRecurrence, subtasks, attachments, timeSlotToSend, hasNotification, notificationTimeToSend)
                 }) {
                     Text(t("Create"))
                         .font(.headline)
@@ -1592,12 +1597,15 @@ struct CreateTaskView: View {
                         .padding(.horizontal)
                         .padding(.bottom, 12)
                 }
-                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .navigationBarTitle(t("Create Task"), displayMode: .inline)
-            .navigationBarItems(leading: Button(t("Cancel")) {
-                onCancel()
-            })
+            .navigationBarItems(leading:
+                Button(action: {
+                    onCancel()
+                }) {
+                    Text(t("Cancel"))
+                }
+            )
             .sheet(isPresented: $showingAttachmentSheet) {
                 AttachmentSheet(
                     attachmentType: $newAttachmentType,
@@ -1609,11 +1617,14 @@ struct CreateTaskView: View {
                     }
                 )
             }
-        }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 focusTitle = true
-                focusSubtask = false
+            }
+        }
+        .onChange(of: title) { newValue in
+            if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                showTitleError = false
             }
         }
     }
@@ -2113,8 +2124,9 @@ struct MainContentView: View {
 
 struct MainPageView_Previews: PreviewProvider {
     static var previews: some View {
-        ContentView()
+        MainContentView()
             .environmentObject(SettingsManager.shared)
+            .previewDevice("iPhone 15 Pro")
     }
 }
 
