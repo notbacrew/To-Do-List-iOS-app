@@ -319,6 +319,7 @@ struct MainPageView: View {
                     HStack {
                         Spacer()
                         Button(action: {
+                            showMenu = false
                             withAnimation(.interpolatingSpring(stiffness: 300, damping: 15)) {
                                 addButtonScale = 1.18
                             }
@@ -1358,6 +1359,16 @@ struct CreateTaskView: View {
     @EnvironmentObject var settingsManager: SettingsManager
     @Environment(\.dismiss) private var dismiss
 
+    // Localization helper
+    private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
+
+    // Focus states for text inputs
+    @FocusState private var focusTitle: Bool
+    @FocusState private var focusSubtask: Bool
+
+    // Validation state
+    @State private var showTitleError: Bool = false
+
     @State private var title: String
     @State private var deadlineEnabled: Bool = false
     @State private var deadline: Date = Date()
@@ -1375,8 +1386,7 @@ struct CreateTaskView: View {
     @State private var isAllDay: Bool = false
     @State private var hasNotification: Bool
     @State private var notificationTime: Date
-    @State private var showTitleError: Bool = false
-    @FocusState private var focusTitle: Bool
+    
 
     init(categories: [String], initialTitle: String = "", initialDeadline: Date? = nil, initialCategory: String? = nil, initialRecurrence: RecurrenceType = .none, initialSubtasks: [Subtask] = [], initialAttachments: [TaskAttachment] = [], initialTimeSlot: TimeSlot? = nil, initialHasNotification: Bool = false, initialNotificationTime: Date? = nil, onCreate: @escaping (String, Date?, String, RecurrenceType, [Subtask], [TaskAttachment], TimeSlot?, Bool, Date?) -> Void, onCancel: @escaping () -> Void) {
         self.categories = categories
@@ -1408,6 +1418,8 @@ struct CreateTaskView: View {
         }
         if let notificationTime = initialNotificationTime {
             _notificationTime = State(initialValue: notificationTime)
+        } else {
+            _notificationTime = State(initialValue: Date())
         }
         if let cat = initialCategory, categories.contains(cat) {
             _selectedCategory = State(initialValue: cat)
@@ -1424,7 +1436,10 @@ struct CreateTaskView: View {
                 Section(header: Text("Task Title")) {
                     TextField("Enter title", text: $title)
                         .focused($focusTitle)
-                        .border(Color.gray) // Added for visibility
+                        .textInputAutocapitalization(.sentences)
+                        .autocorrectionDisabled(false)
+                        .disabled(false)
+                        .allowsHitTesting(true)
                     if showTitleError && title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("Title is required")
                             .font(.caption)
