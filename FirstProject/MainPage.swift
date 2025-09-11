@@ -7,6 +7,21 @@
 //
 
 import SwiftUI
+import UIKit
+
+// Helper shape to round only specific corners (used to clip the bottom bar)
+struct RoundedCorner: Shape {
+    var radius: CGFloat = .infinity
+    var corners: UIRectCorner = [.topLeft, .topRight]
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
+    }
+}
 import UserNotifications
 
 // MARK: - Data Models
@@ -91,7 +106,7 @@ struct TimeSlot: Identifiable {
     }
 }
 
-struct Task: Identifiable {
+struct TodoTask: Identifiable {
     let id: UUID
     var title: String
     var deadline: Date?
@@ -121,12 +136,24 @@ struct Task: Identifiable {
     }
 }
 
+// Backward-compatibility alias to avoid linker errors from stale references
+typealias Task = TodoTask
+
 struct MainPageView: View {
     @EnvironmentObject var settingsManager: SettingsManager
+    @EnvironmentObject var profile: UserProfile
     @State private var showMenu = false
-    @State private var categories = ["All", "Important ❗️", "Work 💼", "Study 📚", "Settings"]
+    @State private var categories = ["All", "Deadline", "Important ❗️", "Work 💼", "Study 📚"]
+    @State private var categoryColors: [String: Color] = [:]
     @State private var showingAddCategorySheet = false
     @State private var newCategoryName = ""
+    @State private var selectedCategoryColor: Color = .blue
+    
+    // Predefined colors for category selection
+    private let availableColors: [Color] = [
+        .red, .orange, .yellow, .green, .mint, .teal, .cyan, .blue, 
+        .indigo, .purple, .pink, .brown, .gray, .black
+    ]
     
     @State private var showingActionSheet = false
     @State private var selectedCategory: String? = "All"
@@ -134,11 +161,14 @@ struct MainPageView: View {
     @State private var editedCategoryName = ""
 
     // Task-related state
-    @State private var tasks: [Task] = []
+    @State private var tasks: [TodoTask] = []
     @State private var showingCreateTaskSheet = false
-    @State private var selectedTask: Task? = nil
+    @State private var selectedTask: TodoTask? = nil
     @State private var showingTaskMenu = false
     @State private var showingEditTaskSheet = false
+    // Track which tasks are expanded to show subtasks
+    @State private var expandedTaskIds: Set<UUID> = []
+    @State private var showingProfile = false
 
     // Week view and daily goal
     @State private var selectedDay: Date = Date()
@@ -148,8 +178,6 @@ struct MainPageView: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    // For Add button bounce
-    @State private var addButtonScale: CGFloat = 1.0
 
     // For animating progress bar
     @State private var progressBarWidth: CGFloat = 0
@@ -203,13 +231,10 @@ struct MainPageView: View {
                         .buttonStyle(PlainButtonStyle())
                         
                         Spacer()
-                        
                         Button(action: {
-                            withAnimation(.spring()) {
-                                showingCalendarView.toggle()
-                            }
+                            withAnimation(.spring()) { showingProfile = true }
                         }) {
-                            Image(systemName: "calendar")
+                            Image(systemName: "person.crop.circle")
                                 .font(.title2)
                                 .foregroundColor(.primary)
                                 .padding(10)
@@ -301,7 +326,7 @@ struct MainPageView: View {
                         .ignoresSafeArea()
                         .allowsHitTesting(showMenu)
                         .onTapGesture {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
                                 showMenu = false
                             }
                         }
@@ -309,44 +334,93 @@ struct MainPageView: View {
 
                     sideMenu
                         .frame(width: 250, height: UIScreen.main.bounds.height * 0.6)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        ))
                         .zIndex(1)
                 }
 
-                // Red circular button with bounce
+                // Bottom Menu Bar
                 VStack {
                     Spacer()
-                    HStack {
-                        Spacer()
+                    HStack(spacing: 16) {
+                        // Calendar Button
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                showingCalendarView.toggle()
+                            }
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "calendar")
+                                    .font(.title2)
+                                    .foregroundColor(.primary)
+                                Text("Calendar")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        // Add Task Button
                         Button(action: {
                             showMenu = false
-                            withAnimation(.interpolatingSpring(stiffness: 300, damping: 15)) {
-                                addButtonScale = 1.18
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
-                                    addButtonScale = 1.0
-                                }
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 showingCreateTaskSheet = true
                             }
                         }) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 64, height: 64)
-                                .background(
-                                    Circle()
-                                        .fill(Color.red)
-                                        .shadow(color: Color.red.opacity(colorScheme == .dark ? 0.23 : 0.18), radius: 10, x: 0, y: 3)
-                                )
+                            VStack(spacing: 2) {
+                                Image(systemName: "plus")
+                                    .font(.title2)
+                                    .foregroundColor(.white)
+                                Text("Add Task")
+                                    .font(.caption2)
+                                    .foregroundColor(.white)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .contentShape(Rectangle())
+                            .background(
+                                RoundedRectangle(cornerRadius: 18)
+                                    .fill(Color.red)
+                            )
                         }
-                        .scaleEffect(addButtonScale)
-                        .animation(.interpolatingSpring(stiffness: 300, damping: 15), value: addButtonScale)
-                        .padding(.bottom, 32)
-                        .padding(.trailing, 24)
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        // Settings Button
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                showingSettings = true
+                            }
+                        }) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "gearshape")
+                                    .font(.title2)
+                                    .foregroundColor(.primary)
+                                Text("Settings")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .padding(.bottom, 20) // Account for home indicator
+                    .background(
+                        Color(.systemBackground)
+                            .clipShape(RoundedCorner(radius: 22, corners: [.topLeft, .topRight]))
+                            .shadow(color: Color.black.opacity(0.12), radius: 16, x: 0, y: -8)
+                    )
                 }
-                .ignoresSafeArea()
+                .ignoresSafeArea(edges: .bottom)
+                .clipped()
 
                 // Notification Banner Overlay
                 if showNotification {
@@ -365,24 +439,54 @@ struct MainPageView: View {
         }
         // Attach all sheets and dialogs to NavigationStack, not nested
         // Only keep category and task sheets, remove edit goal sheet
+        .sheet(isPresented: $showingProfile) {
+            UserProfileView()
+                .environmentObject(settingsManager)
+                .environmentObject(profile)
+        }
         .sheet(isPresented: $showingAddCategorySheet) {
             NavigationView {
                 Form {
                     Section(header: Text("New Category Name")) {
                         TextField("Enter name", text: $newCategoryName)
                     }
+                    
+                    Section(header: Text("Choose Color")) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 15) {
+                            ForEach(availableColors, id: \.self) { color in
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: 40, height: 40)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(selectedCategoryColor == color ? Color.primary : Color.clear, lineWidth: 3)
+                                    )
+                                    .scaleEffect(selectedCategoryColor == color ? 1.1 : 1.0)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedCategoryColor)
+                                    .onTapGesture {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                            selectedCategoryColor = color
+                                        }
+                                    }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
                 }
                 .navigationBarTitle("Add Category", displayMode: .inline)
                 .navigationBarItems(leading: Button("Cancel") {
                     showingAddCategorySheet = false
                     newCategoryName = ""
+                    selectedCategoryColor = .blue
                 }, trailing: Button("Add") {
                     let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
                         categories.append(trimmed)
+                        categoryColors[trimmed] = selectedCategoryColor
                     }
                     showingAddCategorySheet = false
                     newCategoryName = ""
+                    selectedCategoryColor = .blue
                 }.disabled(newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }
@@ -426,10 +530,10 @@ struct MainPageView: View {
         }
         .sheet(isPresented: $showingCreateTaskSheet) {
             CreateTaskView(
-                categories: categories.filter { $0 != "All" && $0 != "Settings" },
+                categories: categories.filter { $0 != "All" && $0 != "Deadline" },
                 onCreate: { title, deadline, category, recurrence, subtasks, attachments, timeSlot, hasNotification, notificationTime in
                     let useDeadline: Date? = deadline ?? selectedDay
-                    let task = Task(title: title, deadline: useDeadline, category: category, recurrence: recurrence, subtasks: subtasks, attachments: attachments, timeSlot: timeSlot, hasNotification: hasNotification, notificationTime: notificationTime)
+                    let task = TodoTask(title: title, deadline: useDeadline, category: category, recurrence: recurrence, subtasks: subtasks, attachments: attachments, timeSlot: timeSlot, hasNotification: hasNotification, notificationTime: notificationTime)
                     tasks.append(task)
                     showingCreateTaskSheet = false
                     showMiniNotification("🆕 Task created!")
@@ -522,7 +626,10 @@ struct MainPageView: View {
 
     var sideMenu: some View {
         RoundedRectangle(cornerRadius: 30)
-            .fill(Color(.systemBackground))
+            .fill(
+                Color(.systemBackground)
+                    .opacity(colorScheme == .dark ? 0.9 : 1.0)
+            )
             .shadow(color: Color.black.opacity(0.12), radius: 7, x: 0, y: 3)
             .overlay(
                 VStack(alignment: .leading, spacing: 0) {
@@ -543,7 +650,7 @@ struct MainPageView: View {
                                             // Navigate to settings page if implemented
                                             // For now, do nothing or handle navigation
                                         } else {
-                                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
+                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
                                                 selectedCategory = category
                                                 showMenu = false
                                             }
@@ -557,15 +664,20 @@ struct MainPageView: View {
                                                 .padding(.vertical, 4)
                                                 .background(
                                                     Capsule()
-                                                        .fill(selectedCategory == category ? colorForCategory(category).opacity(0.18) : Color(.secondarySystemBackground))
+                                                        .fill(
+                                                            selectedCategory == category
+                                                            ? colorForCategory(category).opacity(0.18)
+                                                            : (colorScheme == .dark ? Color(.systemGray4) : Color(.secondarySystemBackground))
+                                                        )
                                                 )
                                                 .scaleEffect(selectedCategory == category ? 1.05 : 1.0)
+                                                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedCategory == category)
                                         }
                                         .matchedGeometryEffect(id: category, in: categoryNamespace)
                                     }
                                     Spacer()
-                                    // Only show ellipsis for editable categories, not "All", not "Settings"
-                                    if category != "All" && category != "Settings" {
+                                    // Only show ellipsis for editable categories, not "All", not "Deadline"
+                                    if category != "All" && category != "Deadline" {
                                         Button(action: {
                                             selectedCategory = category
                                             showingActionSheet = true
@@ -579,7 +691,7 @@ struct MainPageView: View {
                             // Add button always at the end before "Settings"
                             HStack {
                                 Button(action: {
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
                                         showingAddCategorySheet = true
                                     }
                                 }) {
@@ -594,27 +706,6 @@ struct MainPageView: View {
                         }
                         .padding(.top, 0)
                         .padding(.horizontal, 20)
-                        Spacer()
-                    }
-                    Divider()
-                    // "Settings" always last and non-editable
-                    HStack {
-                        Button(action: {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
-                                showMenu = false
-                                showingSettings = true
-                            }
-                        }) {
-                            Text(t("Settings"))
-                                .foregroundColor(.primary)
-                                .font(.headline)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule()
-                                        .fill(selectedCategory == "Settings" ? Color(.secondarySystemBackground) : Color.clear)
-                                )
-                        }
                         Spacer()
                     }
                     .padding(.horizontal, 20)
@@ -653,11 +744,15 @@ struct MainPageView: View {
 
     // Helper: category color for flag and badge
     func colorForCategory(_ category: String) -> Color {
+        // Check if we have a custom color for this category
+        if let customColor = categoryColors[category] {
+            return customColor
+        }
+        
+        // Default colors for system categories
         if category.contains("Work") { return .blue }
         if category.contains("Important") { return .red }
         if category.contains("Study") { return .green }
-        // Add more mappings as needed
-        // Assign more distinct colors for user categories
         if category.contains("Personal") { return .purple }
         if category.contains("Urgent") { return .orange }
         if category.contains("Shopping") { return .yellow }
@@ -678,23 +773,29 @@ struct MainPageView: View {
 
     // Returns the list of categories to show in the menu, excluding "Settings" (which is always last)
     func sortedCategoryList() -> [String] {
-        // Exclude "Settings" from this list, and keep "All" at the start, then all others, then "Settings" is handled separately
-        let filtered = categories.filter { $0 != "Settings" }
-        return filtered
+        // Keep "All" at the start, then all others
+        return categories
     }
 
     // Returns the filtered tasks based on the selected category and selected day
-    func filteredTasks() -> [Task] {
+    func filteredTasks() -> [TodoTask] {
         guard let selected = selectedCategory else { return tasksForSelectedDay() }
-        if selected == "All" || selected == "Settings" {
+        if selected == "All" {
             return tasksForSelectedDay()
+        }
+        if selected == "Deadline" {
+            // Show all tasks with deadlines across all days, sorted by deadline
+            return tasks.filter { $0.deadline != nil }.sorted { task1, task2 in
+                guard let deadline1 = task1.deadline, let deadline2 = task2.deadline else { return false }
+                return deadline1 < deadline2
+            }
         }
         // Only show tasks matching the selected category for the selected day
         return tasksForSelectedDay().filter { $0.category == selected }
     }
 
     // Helper: filter tasks for selected day (ignores time)
-    func tasksForSelectedDay() -> [Task] {
+    func tasksForSelectedDay() -> [TodoTask] {
         let calendar = Calendar.current
         return tasks.filter { task in
             guard let deadline = task.deadline else {
@@ -976,9 +1077,11 @@ struct MainPageView: View {
             ForEach(Array(filteredTasks().enumerated()), id: \.element.id) { idx, task in
                 HStack {
                     Button(action: {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
                             if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
+                                let wasDone = tasks[globalIdx].isDone
                                 tasks[globalIdx].isDone.toggle()
+                                applyXPDeltaForToggle(isNowDone: tasks[globalIdx].isDone, wasDone: wasDone, taskDate: tasks[globalIdx].deadline)
                                 // Haptic feedback
                                 let generator = UIImpactFeedbackGenerator(style: .medium)
                                 generator.impactOccurred()
@@ -1044,7 +1147,6 @@ struct MainPageView: View {
                         if !task.subtasks.isEmpty {
                             let completedSubtasks = task.subtasks.filter { $0.isCompleted }.count
                             let totalSubtasks = task.subtasks.count
-                            
                             HStack {
                                 Image(systemName: "list.bullet")
                                     .font(.caption2)
@@ -1052,12 +1154,49 @@ struct MainPageView: View {
                                 Text("\(completedSubtasks)/\(totalSubtasks) subtasks")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
-                                
                                 if totalSubtasks > 0 {
                                     ProgressView(value: Double(completedSubtasks), total: Double(totalSubtasks))
                                         .progressViewStyle(LinearProgressViewStyle(tint: .green))
                                         .frame(width: 60)
                                 }
+                                Spacer()
+                                Button(action: {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                        if expandedTaskIds.contains(task.id) {
+                                            expandedTaskIds.remove(task.id)
+                                        } else {
+                                            expandedTaskIds.insert(task.id)
+                                        }
+                                    }
+                                }) {
+                                    Image(systemName: expandedTaskIds.contains(task.id) ? "chevron.up" : "chevron.down")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            if expandedTaskIds.contains(task.id) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ForEach(task.subtasks.indices, id: \.self) { sIdx in
+                                        HStack(spacing: 8) {
+                                            Button(action: {
+                                                if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
+                                                    tasks[globalIdx].subtasks[sIdx].isCompleted.toggle()
+                                                }
+                                            }) {
+                                                Image(systemName: task.subtasks[sIdx].isCompleted ? "checkmark.square.fill" : "square")
+                                                    .foregroundColor(.green)
+                                            }
+                                            .buttonStyle(PlainButtonStyle())
+                                            Text(task.subtasks[sIdx].title)
+                                                .font(.subheadline)
+                                                .foregroundColor(.primary)
+                                                .strikethrough(task.subtasks[sIdx].isCompleted)
+                                        }
+                                        .padding(.vertical, 2)
+                                    }
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                                .padding(.top, 4)
                             }
                         }
                         
@@ -1167,8 +1306,14 @@ struct MainPageView: View {
                             // Haptic feedback
                             let generator = UIImpactFeedbackGenerator(style: .rigid)
                             generator.impactOccurred()
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
+                                let wasDone = tasks[globalIdx].isDone
+                                let date = tasks[globalIdx].deadline
                                 tasks.remove(at: globalIdx)
+                                if wasDone {
+                                    applyXPDelta(points: -5, wasToday: isDateToday(date))
+                                    if profile.completedTasks > 0 { profile.completedTasks -= 1 }
+                                }
                                 showMiniNotification("🗑️ Task deleted!")
                             }
                         }
@@ -1178,9 +1323,11 @@ struct MainPageView: View {
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
                     Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7, blendDuration: 0)) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
                             if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
+                                let wasDone = tasks[globalIdx].isDone
                                 tasks[globalIdx].isDone.toggle()
+                                applyXPDeltaForToggle(isNowDone: tasks[globalIdx].isDone, wasDone: wasDone, taskDate: tasks[globalIdx].deadline)
                                 // Haptic feedback
                                 let generator = UIImpactFeedbackGenerator(style: .medium)
                                 generator.impactOccurred()
@@ -1301,7 +1448,7 @@ struct MainPageView: View {
         }
     }
     
-    func scheduleNotification(for task: Task, at date: Date) {
+    func scheduleNotification(for task: TodoTask, at date: Date) {
         guard notificationPermissionGranted else { return }
         
         let content = UNMutableNotificationContent()
@@ -1324,6 +1471,30 @@ struct MainPageView: View {
                 print("Error scheduling notification: \(error)")
             }
         }
+    }
+
+    // MARK: - XP / Statistics
+    private func applyXPDeltaForToggle(isNowDone: Bool, wasDone: Bool, taskDate: Date?) {
+        guard isNowDone != wasDone else { return }
+        if isNowDone {
+            applyXPDelta(points: +5, wasToday: isDateToday(taskDate))
+            profile.completedTasks += 1
+        } else {
+            applyXPDelta(points: -5, wasToday: isDateToday(taskDate))
+            if profile.completedTasks > 0 { profile.completedTasks -= 1 }
+        }
+    }
+
+    private func applyXPDelta(points: Int, wasToday: Bool) {
+        profile.totalXP = max(0, profile.totalXP + points)
+        if wasToday {
+            profile.completedToday = max(0, profile.completedToday + (points > 0 ? 1 : -1))
+        }
+    }
+
+    private func isDateToday(_ date: Date?) -> Bool {
+        guard let date else { return false }
+        return Calendar.current.isDateInToday(date)
     }
 }
 
@@ -1719,10 +1890,10 @@ struct AttachmentSheet: View {
 
 // MARK: - Calendar View
 struct CalendarView: View {
-    let tasks: [Task]
+    let tasks: [TodoTask]
     @Binding var selectedDate: Date
     @Binding var viewMode: CalendarViewMode
-    let onTaskTap: (Task) -> Void
+    let onTaskTap: (TodoTask) -> Void
     let onDateTap: (Date) -> Void
     
     @State private var currentDate = Date()
@@ -1773,10 +1944,10 @@ struct CalendarView: View {
 }
 
 struct MonthCalendarView: View {
-    let tasks: [Task]
+    let tasks: [TodoTask]
     @Binding var selectedDate: Date
     @Binding var currentDate: Date
-    let onTaskTap: (Task) -> Void
+    let onTaskTap: (TodoTask) -> Void
     let onDateTap: (Date) -> Void
     
     private let calendar = Calendar.current
@@ -1877,7 +2048,7 @@ struct MonthCalendarView: View {
         return days
     }
     
-    private func tasksForDate(_ date: Date) -> [Task] {
+    private func tasksForDate(_ date: Date) -> [TodoTask] {
         return tasks.filter { task in
             guard let deadline = task.deadline else { return false }
             return calendar.isDate(deadline, inSameDayAs: date)
@@ -1891,10 +2062,10 @@ struct MonthCalendarView: View {
 }
 
 struct WeekCalendarView: View {
-    let tasks: [Task]
+    let tasks: [TodoTask]
     @Binding var selectedDate: Date
     @Binding var currentDate: Date
-    let onTaskTap: (Task) -> Void
+    let onTaskTap: (TodoTask) -> Void
     let onDateTap: (Date) -> Void
     
     private let calendar = Calendar.current
@@ -1964,7 +2135,7 @@ struct WeekCalendarView: View {
         }
     }
     
-    private func tasksForDate(_ date: Date) -> [Task] {
+    private func tasksForDate(_ date: Date) -> [TodoTask] {
         return tasks.filter { task in
             guard let deadline = task.deadline else { return false }
             return calendar.isDate(deadline, inSameDayAs: date)
@@ -1988,57 +2159,54 @@ struct WeekCalendarView: View {
 
 struct DayCell: View {
     let date: Date
-    let tasks: [Task]
+    let tasks: [TodoTask]
     let isSelected: Bool
     let isToday: Bool
     let onTap: () -> Void
-    let onTaskTap: (Task) -> Void
+    let onTaskTap: (TodoTask) -> Void
     
     private let calendar = Calendar.current
     
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 6) {
+            // Day number
             Text("\(calendar.component(.day, from: date))")
-                .font(.system(size: 16, weight: isToday ? .bold : .medium))
-                .foregroundColor(isToday ? .white : (isSelected ? .white : .primary))
-            
-            if !tasks.isEmpty {
-                VStack(spacing: 1) {
-                    ForEach(tasks.prefix(3), id: \.id) { task in
-                        Button(action: {
-                            onTaskTap(task)
-                        }) {
-                            Text(task.title)
-                                .font(.caption2)
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(colorForCategory(task.category))
-                                )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    
-                    if tasks.count > 3 {
-                        Text("+\(tasks.count - 3)")
+                .font(.system(size: 16, weight: isToday ? .bold : .semibold))
+                .foregroundColor(isToday || isSelected ? .white : .primary)
+
+            // Up to two tasks as rows like badges
+            VStack(spacing: 2) {
+                ForEach(tasks.prefix(2), id: \.id) { task in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(colorForCategory(task.category))
+                            .frame(width: 6, height: 6)
+                        Text(task.title)
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(isSelected ? .white.opacity(0.95) : .secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 0)
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { onTaskTap(task) }
+                }
+                if tasks.count > 2 {
+                    Text("+\(tasks.count - 2)")
+                        .font(.caption2)
+                        .foregroundColor(isSelected ? .white.opacity(0.8) : .secondary)
                 }
             }
         }
-        .frame(height: 60)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .frame(height: 74)
         .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.red : (isToday ? Color.blue.opacity(0.2) : Color.clear))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.red : (isToday ? Color.red.opacity(0.18) : Color.clear))
         )
-        .onTapGesture {
-            onTap()
-        }
+        .onTapGesture { onTap() }
     }
     
     private func colorForCategory(_ category: String) -> Color {
@@ -2051,16 +2219,16 @@ struct DayCell: View {
 
 struct WeekDayRow: View {
     let date: Date
-    let tasks: [Task]
+    let tasks: [TodoTask]
     let isSelected: Bool
     let isToday: Bool
     let onTap: () -> Void
-    let onTaskTap: (Task) -> Void
+    let onTaskTap: (TodoTask) -> Void
     
     private let calendar = Calendar.current
     private let dateFormatter = DateFormatter()
     
-    init(date: Date, tasks: [Task], isSelected: Bool, isToday: Bool, onTap: @escaping () -> Void, onTaskTap: @escaping (Task) -> Void) {
+    init(date: Date, tasks: [TodoTask], isSelected: Bool, isToday: Bool, onTap: @escaping () -> Void, onTaskTap: @escaping (TodoTask) -> Void) {
         self.date = date
         self.tasks = tasks
         self.isSelected = isSelected
@@ -2130,10 +2298,12 @@ struct WeekDayRow: View {
 
 struct MainContentView: View {
     @EnvironmentObject var settingsManager: SettingsManager
+    @EnvironmentObject var profile: UserProfile
     
     var body: some View {
         MainPageView()
             .environmentObject(settingsManager)
+            .environmentObject(profile)
     }
 }
 
@@ -2141,6 +2311,7 @@ struct MainPageView_Previews: PreviewProvider {
     static var previews: some View {
         MainContentView()
             .environmentObject(SettingsManager.shared)
+            .environmentObject(UserProfile())
             .previewDevice("iPhone 15 Pro")
     }
 }

@@ -41,24 +41,12 @@ struct ContentView: View {
                             .cornerRadius(40)
                     }
                     Spacer()
-                    Button(action: {
-                        isEnglish.toggle()
-                    }) {
-                        HStack {
-                            Image(systemName: "globe")
-                                .fontWeight(.bold)
-                                .foregroundColor(.blue)
-                            Text(isEnglish ? "Change Language" : "Сменить язык")
-                                .fontWeight(.heavy)
-                                .foregroundColor(.blue)
-                        }
-                        .padding(.bottom, 8)
-                    }
                 }
             }
             // Use a hidden NavigationLink to navigate programmatically
             NavigationLink("", isActive: $showMainPage) {
                 MainPageView()
+                    .environmentObject(UserProfile())
             }
             .hidden()
         }
@@ -67,6 +55,8 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environmentObject(SettingsManager.shared)
+        .environmentObject(UserProfile())
 }
 
 struct ZMainPageView: View {
