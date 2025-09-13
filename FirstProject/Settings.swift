@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UserNotifications
+import Combine
 
 // MARK: - Localization
 
@@ -30,7 +31,6 @@ extension LocalizedStringKey {
     static let progressBarStyle = LocalizedStringKey("Progress Bar Style")
     static let enableAnimations = LocalizedStringKey("Enable Animations")
     static let exportAndBackup = LocalizedStringKey("Export & Backup")
-    static let iCloudSync = LocalizedStringKey("iCloud Sync")
     static let exportTasks = LocalizedStringKey("Export Tasks")
     static let done = LocalizedStringKey("Done")
     static let cancel = LocalizedStringKey("Cancel")
@@ -39,6 +39,11 @@ extension LocalizedStringKey {
     static let edit = LocalizedStringKey("Edit")
     static let delete = LocalizedStringKey("Delete")
     static let reset = LocalizedStringKey("Reset")
+}
+
+// Notification names
+extension Notification.Name {
+    static let resetStatisticsRequested = Notification.Name("ResetStatisticsRequested")
 }
 
 // MARK: - Localized Text Helper
@@ -61,8 +66,6 @@ extension String {
             "Appearance & Language": "Внешний вид и язык",
             "Theme": "Тема",
             "Language": "Язык",
-            "Time Format": "Формат времени",
-            "Date Format": "Формат даты",
             "Tasks & Notifications": "Задачи и уведомления",
             "Push Notifications": "Push-уведомления",
             "Notification Sound": "Звук уведомлений",
@@ -76,11 +79,11 @@ extension String {
             "Progress Bar Style": "Стиль прогресс-бара",
             "Enable Animations": "Включить анимации",
             "Export & Backup": "Экспорт и резервное копирование",
-            "iCloud Sync": "Синхронизация iCloud",
             "Export Tasks": "Экспорт задач",
             "Done": "Готово",
             "Cancel": "Отмена",
             "Add": "Добавить",
+            "Create": "Создать",
             "Save": "Сохранить",
             "Edit": "Редактировать",
             "Delete": "Удалить",
@@ -89,23 +92,112 @@ extension String {
             "Russian": "Русский",
             "12-hour": "12-часовой",
             "24-hour": "24-часовой",
-            "Short": "Короткий",
-            "Medium": "Средний",
-            "Long": "Длинный",
-            "European": "Европейский",
+            "Dark": "Тёмная",
+            "Light": "Светлая",
+            "System": "Системная",
+            "Calendar": "Календарь",
+            "Add Task": "Добавить задачу",
+            "New Category Name": "Название новой категории",
+            "Choose Color": "Выберите цвет",
+            "Edit Category Name": "Изменить название категории",
+            "Task Title": "Название задачи",
+            "Title is required": "Требуется название",
+            "Attachment Type": "Тип вложения",
+            "Content": "Содержимое",
+            "Name (Optional)": "Имя (необязательно)",
+            "each": "каждый",
+            "day": "день",
+            "week": "неделя",
+            "month": "месяц",
+            "year": "год",
+            "Monday": "Понедельник",
+            "Tuesday": "Вторник",
+            "Wednesday": "Среда",
+            "Thursday": "Четверг",
+            "Friday": "Пятница",
+            "Saturday": "Суббота",
+            "Sunday": "Воскресенье",
+            "level": "Уровень",
+            "Statistics": "Статистика",
+            "Completed": "Завершенные",
+            "Today": "Сегодня",
+            "task done for today": "Задач завершено сегодня",
+            "of": "из",
+            "All": "Все",
+            "Short": "Короткая",
+            "Medium": "Средняя",
+            "Long": "Длинная",
+            "European": "Европейская",
             "Default": "По умолчанию",
             "Gentle": "Мягкий",
             "Urgent": "Срочный",
             "Subtle": "Тонкий",
             "Linear": "Линейный",
-            "Circular": "Круговой",
+            "Circular": "Круговой", 
             "Animated": "Анимированный",
-            "Dark": "Тёмная",
-            "Light": "Светлая",
-            "System": "Системная"
-            
+            "Time Format": "Формат времени",
+            "Date Format": "Формат даты",
+            "Add subtask": "Добавить подзадачу",
+            "subtask": "подзадача",
+            "Subtasks": "Подзадачи",
+            "Mark as complete": "Отметить как завершенный",
+            "Mark as incomplete": "Отметить как незавершенный",
+            "Move to": "Переместить в",
+            "Move to category": "Переместить в категорию",
+            "Move to top level": "Переместить наверх",
+            "Notification": "Уведомление",
+            "Notifications": "Уведомления",
+            "Notifications will be sent when a task is completed or moved to a different category.": "Уведомления будут отправлены, когда задача завершена или перемещена в другую категорию.",
+            "time blocking": "заблокированное время",
+            "Schedule Specific Time": "Запланировать конкретное время",
+            "Enable Notification": "Включить уведомление",
+            "Attachments": "Вложения",
+            "Add Attachment": "Добавить вложение",
+            "Add Category": "Добавить категорию",
+            "Edit Category": "Редактировать категорию",
+            "Set Deadline": "Установить срок",
+            "Deadline": "Срок",
+            "Display name": "Отображаемое имя",
+            "Link": "Ссылка",
+            "Image": "Изображение",
+            "Description": "Описание",
+            "Description (Optional)": "Описание (необязательно)",
+            "Add Link": "Добавить ссылку",
+            "Add Image": "Добавить изображение",
+            "Add File": "Добавить файл",
+            "File": "Файл",
+            "Mon": "Пн",
+            "Tue": "Вт",
+            "Wed": "Ср",
+            "Thu": "Чт",
+            "Fri": "Пт",
+            "Sat": "Сб",
+            "Sun": "Вс",
+            "Category": "Категория",
+            "Time Blocking": "Конкретное время",
+            "Ressources": "Ресурсы",
+            "None": "Нет",
+            "Daily": "Ежедневно",
+            "Weekly": "Еженедельно",
+            "Monthly": "Ежемесячно",
+            "Recurrence": "Повторение",
+            "Type": "Тип",
+            "View Mode": "Режим просмотра",
+            "Category Details": "Детали категории",
+            "Color": "Цвет",
+            "Template Details": "Детали шаблона",
+            "Time Slot": "Временной слот",
+            "Enter title": "Введите название",
+            "Complete tasks: +5 XP each": "Завершить задачи: +5 XP за каждую",
+            "XP": "XP",
+            "Repeat": "Повторять", 
         ]
     }
+}
+
+// Global localization convenience so any View can call t("Key")
+func t(_ key: String) -> String {
+    key.localized(for: SettingsManager.shared.appLanguage)
 }
 
 // MARK: - Settings Models
@@ -117,9 +209,9 @@ enum AppTheme: String, CaseIterable {
     
     var localizedName: String {
         switch self {
-        case .light: return NSLocalizedString("Light", comment: "Light theme")
-        case .dark: return NSLocalizedString("Dark", comment: "Dark theme")
-        case .system: return NSLocalizedString("System", comment: "System theme")
+        case .light: return NSLocalizedString("Light", comment: "Light")
+        case .dark: return NSLocalizedString("Dark", comment: "Dark")
+        case .system: return NSLocalizedString("System", comment: "System")
         }
     }
 }
@@ -198,7 +290,6 @@ class SettingsManager: ObservableObject {
     @Published var fontSize: Double = 16.0
     @Published var progressBarStyle: ProgressBarStyle = .linear
     @Published var animationsEnabled: Bool = true
-    @Published var iCloudSync: Bool = true
     @Published var categories: [CategorySettings] = []
     @Published var taskTemplates: [TaskTemplate] = []
     
@@ -252,7 +343,6 @@ class SettingsManager: ObservableObject {
         }
         
         animationsEnabled = UserDefaults.standard.bool(forKey: "animationsEnabled")
-        iCloudSync = UserDefaults.standard.bool(forKey: "iCloudSync")
     }
     
     private func setupDefaultCategories() {
@@ -288,7 +378,6 @@ class SettingsManager: ObservableObject {
         UserDefaults.standard.set(fontSize, forKey: "fontSize")
         UserDefaults.standard.set(progressBarStyle.rawValue, forKey: "progressBarStyle")
         UserDefaults.standard.set(animationsEnabled, forKey: "animationsEnabled")
-        UserDefaults.standard.set(iCloudSync, forKey: "iCloudSync")
         
         // Apply language change immediately
         applyLanguageChange()
@@ -297,12 +386,15 @@ class SettingsManager: ObservableObject {
     private func applyLanguageChange() {
         // This would typically involve changing the app's language
         // For now, we'll just trigger a UI update
-        objectWillChange.send()
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+        }
     }
     
     func resetStatistics() {
-        // This would reset task completion statistics
-        UserDefaults.standard.removeObject(forKey: "taskStatistics")
+        // Reset all app-side statistics without touching user level/XP logic
+        // We use EnvironmentObject UserProfile to keep level (XP) intact per requirement
+        NotificationCenter.default.post(name: .resetStatisticsRequested, object: nil)
     }
     
     func exportTasks() -> Data? {
@@ -391,7 +483,6 @@ struct SettingsView: View {
     @State private var showingExportSheet = false
     @State private var showingResetAlert = false
     
-    private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
     
     var body: some View {
         NavigationView {
@@ -408,9 +499,9 @@ struct SettingsView: View {
                         
                         Spacer()
                         
-                        Picker("Theme", selection: $settingsManager.appTheme) {
+                        Picker("", selection: $settingsManager.appTheme) {
                             ForEach(AppTheme.allCases, id: \.self) { theme in
-                                Text(theme.localizedName).tag(theme)
+                                Text(t(theme.rawValue)).tag(theme)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
@@ -429,9 +520,9 @@ struct SettingsView: View {
                         
                         Spacer()
                         
-                        Picker("Language", selection: $settingsManager.appLanguage) {
+                        Picker("", selection: $settingsManager.appLanguage) {
                             ForEach(AppLanguage.allCases, id: \.self) { language in
-                                Text(language.localizedName).tag(language)
+                                Text(t(language.rawValue == "en" ? "English" : "Russian")).tag(language)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
@@ -445,13 +536,14 @@ struct SettingsView: View {
                         Image(systemName: "clock")
                             .foregroundColor(.orange)
                             .frame(width: 24)
-                    
+                        
+                        Text(t("Time Format"))
                         
                         Spacer()
                         
-                        Picker("Time Format", selection: $settingsManager.timeFormat) {
+                        Picker("", selection: $settingsManager.timeFormat) {
                             ForEach(TimeFormat.allCases, id: \.self) { format in
-                                Text(format.localizedName).tag(format)
+                                Text(t(format.rawValue == "12h" ? "12-hour" : "24-hour")).tag(format)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
@@ -466,12 +558,13 @@ struct SettingsView: View {
                             .foregroundColor(.purple)
                             .frame(width: 24)
                         
+                        Text(t("Date Format"))
                         
                         Spacer()
                         
-                        Picker("Date Format", selection: $settingsManager.dateFormat) {
+                        Picker("", selection: $settingsManager.dateFormat) {
                             ForEach(DateFormat.allCases, id: \.self) { format in
-                                Text(format.localizedName).tag(format)
+                                Text(t(format.rawValue == "MM/dd/yyyy" ? "Short" : format.rawValue == "MMM dd, yyyy" ? "Medium" : format.rawValue == "MMMM dd, yyyy" ? "Long" : "European")).tag(format)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
@@ -506,9 +599,9 @@ struct SettingsView: View {
                             
                             Spacer()
                             
-                            Picker("Sound", selection: $settingsManager.notificationSound) {
+                            Picker("", selection: $settingsManager.notificationSound) {
                                 ForEach(NotificationSound.allCases, id: \.self) { sound in
-                                    Text(sound.localizedName).tag(sound)
+                                    Text(t(sound.rawValue == "default" ? "Default" : sound.rawValue == "gentle" ? "Gentle" : sound.rawValue == "urgent" ? "Urgent" : "Subtle")).tag(sound)
                                 }
                             }
                             .pickerStyle(MenuPickerStyle())
@@ -626,7 +719,7 @@ struct SettingsView: View {
                         
                         Picker("", selection: $settingsManager.progressBarStyle) {
                             ForEach(ProgressBarStyle.allCases, id: \.self) { style in
-                                Text(style.localizedName).tag(style)
+                                Text(t(style.rawValue == "Linear" ? "Linear" : style.rawValue == "Circular" ? "Circular" : "Animated")).tag(style)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
@@ -650,18 +743,6 @@ struct SettingsView: View {
                 
                 // MARK: - Export & Backup
                 Section(header: Text(t("Export & Backup"))) {
-                    // iCloud Sync
-                    HStack {
-                        Image(systemName: "icloud")
-                            .foregroundColor(.blue)
-                            .frame(width: 24)
-                        
-                        Toggle(t("iCloud Sync"), isOn: $settingsManager.iCloudSync)
-                            .onChange(of: settingsManager.iCloudSync) { _ in
-                                settingsManager.saveSettings()
-                            }
-                    }
-                    
                     // Export Tasks
                     Button(action: {
                         showingExportSheet = true
@@ -694,6 +775,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .id(settingsManager.appLanguage)
         .sheet(isPresented: $showingCategoryEditor) {
             CategoryEditorView(categories: $settingsManager.categories)
         }
@@ -782,12 +864,12 @@ struct AddCategoryView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Category Details") {
+                Section(t("Category Details")) {
                     TextField("Name", text: $name)
                     TextField("Emoji", text: $emoji)
                 }
                 
-                Section("Color") {
+                Section(t("Color")) {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 16) {
                         ForEach(availableColors, id: \.self) { color in
                             Button(action: {
@@ -847,12 +929,12 @@ struct EditCategoryView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Category Details") {
+                Section(t("Category Details")) {
                     TextField("Name", text: $name)
                     TextField("Emoji", text: $emoji)
                 }
                 
-                Section("Color") {
+                Section(t("Color")) {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 16) {
                         ForEach(availableColors, id: \.self) { color in
                             Button(action: {
@@ -950,18 +1032,20 @@ struct AddTemplateView: View {
     @State private var endTime = Date()
     
     private let categories = ["Important ❗️", "Work 💼", "Study 📚", "Personal 🏠"]
-    private let recurrences = ["None", "Daily", "Weekly", "Monthly"]
+    private var recurrences: [String] {
+        ["None", "Daily", "Weekly", "Monthly"]
+    }
     
     var body: some View {
         NavigationView {
             Form {
-                Section("Template Details") {
+                Section(t("Template Details")) {
                     TextField("Template Name", text: $name)
                     TextField("Task Title", text: $title)
                 }
                 
-                Section("Category") {
-                    Picker("Category", selection: $category) {
+                Section(t("Category")) {
+                    Picker(t("Category"), selection: $category) {
                         ForEach(categories, id: \.self) { cat in
                             Text(cat).tag(cat)
                         }
@@ -969,21 +1053,21 @@ struct AddTemplateView: View {
                     .pickerStyle(MenuPickerStyle())
                 }
                 
-                Section("Recurrence") {
-                    Picker("Recurrence", selection: $recurrence) {
+                Section(t("Recurrence")) {
+                    Picker(t("Recurrence"), selection: $recurrence) {
                         ForEach(recurrences, id: \.self) { rec in
-                            Text(rec).tag(rec)
+                            Text(t(rec)).tag(rec)
                         }
                     }
                     .pickerStyle(MenuPickerStyle())
                 }
                 
-                Section("Time Slot") {
+                Section(t("Time Slot")) {
                     Toggle("Has Time Slot", isOn: $hasTimeSlot)
                     
                     if hasTimeSlot {
-                        DatePicker("Start Time", selection: $startTime, displayedComponents: [.hourAndMinute])
-                        DatePicker("End Time", selection: $endTime, displayedComponents: [.hourAndMinute])
+                        DatePicker(t("Start Time"), selection: $startTime, displayedComponents: [.hourAndMinute])
+                        DatePicker(t("End Time"), selection: $endTime, displayedComponents: [.hourAndMinute])
                     }
                 }
             }

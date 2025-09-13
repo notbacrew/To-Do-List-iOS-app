@@ -200,7 +200,7 @@ struct MainPageView: View {
     // Settings state
     @State private var showingSettings = false
 
-    private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
+    // Use global t(_:) defined in Settings.swift
 
     var body: some View {
         NavigationStack {
@@ -290,9 +290,6 @@ struct MainPageView: View {
                         }
                         // Task count
                         HStack {
-                            Text("\(completedTasks()) of \(dailyTaskGoalForSelectedDay()) tasks done for \(formattedSelectedDay())")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                             Spacer()
                         }
                         .padding(.horizontal)
@@ -355,7 +352,7 @@ struct MainPageView: View {
                                 Image(systemName: "calendar")
                                     .font(.title2)
                                     .foregroundColor(.primary)
-                                Text("Calendar")
+                                Text(t("Calendar"))
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
@@ -376,7 +373,7 @@ struct MainPageView: View {
                                 Image(systemName: "plus")
                                     .font(.title2)
                                     .foregroundColor(.white)
-                                Text("Add Task")
+                                Text(t("Add Task"))
                                     .font(.caption2)
                                     .foregroundColor(.white)
                             }
@@ -400,7 +397,7 @@ struct MainPageView: View {
                                 Image(systemName: "gearshape")
                                     .font(.title2)
                                     .foregroundColor(.primary)
-                                Text("Settings")
+                                Text(t("Settings"))
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
@@ -447,11 +444,11 @@ struct MainPageView: View {
         .sheet(isPresented: $showingAddCategorySheet) {
             NavigationView {
                 Form {
-                    Section(header: Text("New Category Name")) {
+                    Section(header: Text(t("New Category Name"))) {
                         TextField("Enter name", text: $newCategoryName)
                     }
                     
-                    Section(header: Text("Choose Color")) {
+                    Section(header: Text(t("Choose Color"))) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 15) {
                             ForEach(availableColors, id: \.self) { color in
                                 Circle()
@@ -473,12 +470,12 @@ struct MainPageView: View {
                         .padding(.vertical, 8)
                     }
                 }
-                .navigationBarTitle("Add Category", displayMode: .inline)
-                .navigationBarItems(leading: Button("Cancel") {
+                .navigationBarTitle(t("Add Category"), displayMode: .inline)
+                .navigationBarItems(leading: Button(t("Cancel")) {
                     showingAddCategorySheet = false
                     newCategoryName = ""
                     selectedCategoryColor = .blue
-                }, trailing: Button("Add") {
+                }, trailing: Button(t("Add")) {
                     let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
                         categories.append(trimmed)
@@ -492,32 +489,32 @@ struct MainPageView: View {
         }
         // (Removed .sheet for showingEditGoalSheet)
         .confirmationDialog("Options", isPresented: $showingActionSheet, titleVisibility: .visible) {
-            Button("Edit") {
+            Button(t("Edit")) {
                 if let selected = selectedCategory {
                     editedCategoryName = selected
                     showingEditSheet = true
                 }
             }
-            Button("Delete", role: .destructive) {
+            Button(t("Delete"), role: .destructive) {
                 if let selected = selectedCategory, let index = categories.firstIndex(of: selected) {
                     categories.remove(at: index)
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(t("Cancel"), role: .cancel) {}
         }
         .sheet(isPresented: $showingEditSheet) {
             NavigationView {
                 Form {
-                    Section(header: Text("Edit Category Name")) {
+                    Section(header: Text(t("Edit Category Name"))) {
                         TextField("Enter name", text: $editedCategoryName)
                     }
                 }
-                .navigationBarTitle("Edit Category", displayMode: .inline)
-                .navigationBarItems(leading: Button("Cancel") {
+                .navigationBarTitle(t("Edit Category"), displayMode: .inline)
+                .navigationBarItems(leading: Button(t("Cancel")) {
                     showingEditSheet = false
                     editedCategoryName = ""
                     selectedCategory = nil
-                }, trailing: Button("Save") {
+                }, trailing: Button(t("Save")) {
                     let trimmed = editedCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty, let selected = selectedCategory, let index = categories.firstIndex(of: selected) {
                         categories[index] = trimmed
@@ -590,16 +587,16 @@ struct MainPageView: View {
             }
         }
         .confirmationDialog("Task Options", isPresented: $showingTaskMenu, titleVisibility: .visible, presenting: selectedTask) { task in
-            Button("Edit") {
+            Button(t("Edit")) {
                 showingEditTaskSheet = true
             }
-            Button("Delete", role: .destructive) {
+            Button(t("Delete"), role: .destructive) {
                 if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
                     tasks.remove(at: idx)
                     showMiniNotification("🗑️ Task deleted!")
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button(t("Cancel"), role: .cancel) {}
         }
         .sheet(isPresented: $showingCalendarView) {
             CalendarView(
@@ -973,7 +970,7 @@ struct MainPageView: View {
                 Button(action: {
                     onSave(selectedDay, editingCount)
                 }) {
-                    Text("Save")
+                    Text(t("Save"))
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
@@ -1285,11 +1282,11 @@ struct MainPageView: View {
                 .cornerRadius(18)
                 .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: 2)
                 .contextMenu {
-                    Button("Edit") {
+                    Button(t("Edit")) {
                         selectedTask = task
                         showingEditTaskSheet = true
                     }
-                    Button("Delete", role: .destructive) {
+                    Button(t("Delete"), role: .destructive) {
                         if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
                             // Haptic feedback
                             let generator = UIImpactFeedbackGenerator(style: .rigid)
@@ -1604,15 +1601,15 @@ struct CreateTaskView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("Task Title")) {
-                    TextField("Enter title", text: $title)
+                Section(header: Text(t("Task Title"))) {
+                    TextField(t("Enter title"), text: $title)
                         .focused($focusTitle)
                         .textInputAutocapitalization(.sentences)
                         .autocorrectionDisabled(false)
                         .disabled(false)
                         .allowsHitTesting(true)
                     if showTitleError && title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Title is required")
+                        Text(t("Title is required"))
                             .font(.caption)
                             .foregroundColor(.red)
                     }
@@ -1629,7 +1626,7 @@ struct CreateTaskView: View {
                     Section(header: Text(t("Recurrence"))) {
                         Picker(t("Repeat"), selection: $selectedRecurrence) {
                             ForEach(RecurrenceType.allCases, id: \.self) { type in
-                                Text(type.rawValue).tag(type)
+                                Text(t(type.rawValue)).tag(type)
                             }
                         }
                         .pickerStyle(SegmentedPickerStyle())
@@ -1847,8 +1844,8 @@ struct AttachmentSheet: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Attachment Type")) {
-                    Picker("Type", selection: $attachmentType) {
+                Section(header: Text(t("Attachment Type"))) {
+                    Picker(t("Type"), selection: $attachmentType) {
                         ForEach(AttachmentType.allCases, id: \.self) { type in
                             HStack {
                                 Image(systemName: type.icon)
@@ -1859,7 +1856,7 @@ struct AttachmentSheet: View {
                     .pickerStyle(SegmentedPickerStyle())
                 }
                 
-                Section(header: Text("Content")) {
+                Section(header: Text(t("Content"))) {
                     if attachmentType == .link {
                         TextField("URL", text: $content)
                             .keyboardType(.URL)
@@ -1869,16 +1866,16 @@ struct AttachmentSheet: View {
                     }
                 }
                 
-                Section(header: Text("Name (Optional)")) {
+                Section(header: Text(t("Name (Optional)"))) {
                     TextField("Display name", text: $name)
                 }
             }
-            .navigationBarTitle("Add Attachment", displayMode: .inline)
+            .navigationBarTitle(t("Add Attachment"), displayMode: .inline)
             .navigationBarItems(
-                leading: Button("Cancel") {
+                leading: Button(t("Cancel")) {
                     dismiss()
                 },
-                trailing: Button("Add") {
+                trailing: Button(t("Add")) {
                     onAdd(attachmentType, content, name.isEmpty ? nil : name)
                     dismiss()
                 }
@@ -1904,7 +1901,7 @@ struct CalendarView: View {
             VStack(spacing: 0) {
                 // Header with view mode picker
                 HStack {
-                    Picker("View Mode", selection: $viewMode) {
+                    Picker(t("View Mode"), selection: $viewMode) {
                         ForEach(CalendarViewMode.allCases, id: \.self) { mode in
                             Text(mode.rawValue).tag(mode)
                         }
@@ -1914,7 +1911,7 @@ struct CalendarView: View {
                     
                     Spacer()
                     
-                    Button("Done") {
+                    Button(t("Done")) {
                         dismiss()
                     }
                 }

@@ -10,6 +10,7 @@ import PhotosUI
 import Combine
 import AuthenticationServices
 
+
 final class UserProfile: ObservableObject {
     private let ud = UserDefaults.standard
     private let keyUsername = "user.username"
@@ -55,6 +56,13 @@ final class UserProfile: ObservableObject {
                 self?.ud.set(v, forKey: self?.keyCompletedToday ?? "user.completedToday")
             }
             .store(in: &cancellables)
+
+        // Reset statistics listener (do not change totalXP)
+        NotificationCenter.default.addObserver(forName: .resetStatisticsRequested, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.completedTasks = 0
+            self.completedToday = 0
+        }
     }
 
     // Call to persist avatar when changed
@@ -165,18 +173,6 @@ struct UserProfileView: View {
                         .font(.title2.weight(.bold))
                 }
             }
-            SignInWithAppleButton(.signIn) { request in
-                request.requestedScopes = [.fullName, .email]
-            } onCompletion: { result in
-                switch result {
-                case .success(let authResults):
-                    print("Authorization successful: \(authResults)")
-                case .failure(let error):
-                    print("Authorization failed: \(error.localizedDescription)")
-                }
-            }
-            .signInWithAppleButtonStyle(.black)
-            .frame(height: 44)
         }
         .frame(maxWidth: .infinity)
         .padding()
@@ -196,7 +192,7 @@ struct UserProfileView: View {
             ProgressView(value: profile.progressToNextLevel)
                 .progressViewStyle(.linear)
                 .tint(.red)
-            Text("Complete tasks: +5 XP each")
+            Text(t("Complete tasks: +5 XP each"))
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -207,12 +203,12 @@ struct UserProfileView: View {
 
     var statsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Statistics")
+            Text(t("Statistics"))
                 .font(.headline)
             HStack(spacing: 12) {
-                statCard(title: "Completed", value: "\(profile.completedTasks)")
-                statCard(title: "Today", value: "\(profile.completedToday)")
-                statCard(title: "XP", value: "\(profile.totalXP)")
+                statCard(title: t("Completed"), value: "\(profile.completedTasks)")
+                statCard(title: t("Today"), value: "\(profile.completedToday)")
+                statCard(title: t("XP"), value: "\(profile.totalXP)")
             }
         }
         .padding()
