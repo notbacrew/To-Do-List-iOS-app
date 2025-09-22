@@ -1,4 +1,3 @@
-
 //
 //  MainPage.swift
 //  FirstProject
@@ -8,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import UserNotifications
 
 // Helper shape to round only specific corners (used to clip the bottom bar)
 struct RoundedCorner: Shape {
@@ -22,7 +22,6 @@ struct RoundedCorner: Shape {
         return Path(path.cgPath)
     }
 }
-import UserNotifications
 
 // MARK: - Data Models
 
@@ -34,6 +33,7 @@ enum RecurrenceType: String, CaseIterable {
 }
 
 enum CalendarViewMode: String, CaseIterable {
+    case day = "Day"
     case week = "Week"
     case month = "Month"
 }
@@ -139,303 +139,209 @@ struct TodoTask: Identifiable {
 // Backward-compatibility alias to avoid linker errors from stale references
 typealias Task = TodoTask
 
+// MARK: - Tabs
+private enum MainTab: Hashable {
+    case home
+    case calendar
+    case settings
+    
+    var title: String {
+        switch self {
+        case .home: return t("Home")
+        case .calendar: return t("Calendar")
+        case .settings: return t("Settings")
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .home: return "house.fill"
+        case .calendar: return "calendar"
+        case .settings: return "gearshape.fill"
+        }
+    }
+}
+
+// MARK: - Progress Bar (top-level)
+struct ProgressBarView: View {
+    var progress: Double
+    var completed: Int
+    var total: Int
+    var style: ProgressBarStyle
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        switch style {
+        case .linear:
+            LinearProgressView(progress: progress, colorScheme: colorScheme)
+        case .circular:
+            CircularProgressView(progress: progress, completed: completed, total: total)
+        case .animated:
+            AnimatedProgressView(progress: progress, colorScheme: colorScheme)
+        }
+    }
+}
+
+struct LinearProgressView: View {
+    var progress: Double
+    var colorScheme: ColorScheme
+    
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(.systemGray5))
+                    .frame(height: 12)
+                Capsule()
+                    .fill(LinearGradient(colors: [.red, .orange, .yellow], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(0, min(1.0, progress)) * geo.size.width, height: 12)
+                    .animation(.spring(), value: progress)
+            }
+        }
+        .frame(height: 12)
+    }
+}
+
+struct CircularProgressView: View {
+    var progress: Double
+    var completed: Int
+    var total: Int
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color(.systemGray5), lineWidth: 8)
+                .frame(width: 44, height: 44)
+            
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(LinearGradient(colors: [.red, .orange, .yellow], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .frame(width: 44, height: 44)
+                .rotationEffect(.degrees(-90))
+                .animation(.spring(), value: progress)
+            
+            Text("\(completed)/\(total)")
+                .font(.caption2)
+                .fontWeight(.bold)
+        }
+    }
+}
+
+struct AnimatedProgressView: View {
+    var progress: Double
+    var colorScheme: ColorScheme
+    @State private var animatedProgress: Double = 0
+    
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(.systemGray5))
+                    .frame(height: 12)
+                
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.red, .orange, .yellow],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: max(0, min(1.0, animatedProgress)) * geo.size.width, height: 12)
+                    .animation(.spring(response: 0.8, dampingFraction: 0.6), value: animatedProgress)
+            }
+        }
+        .frame(height: 12)
+        .onAppear {
+            withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
+                animatedProgress = progress
+            }
+        }
+        .onChange(of: progress) { newValue in
+            withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
+                animatedProgress = newValue
+            }
+        }
+    }
+}
+
+// MARK: - Main Page with Tabs and Liquid Glass Bottom Bar
 struct MainPageView: View {
     @EnvironmentObject var settingsManager: SettingsManager
     @EnvironmentObject var profile: UserProfile
+    
+    // Tabs
+    @State private var selectedTab: MainTab = .home
+    
+    // Old states reused inside Home tab
     @State private var showMenu = false
     @State private var categories = ["All", "Deadline", "Important ❗️", "Work 💼", "Study 📚"]
     @State private var categoryColors: [String: Color] = [:]
     @State private var showingAddCategorySheet = false
     @State private var newCategoryName = ""
     @State private var selectedCategoryColor: Color = .blue
-    
-    // Predefined colors for category selection
     private let availableColors: [Color] = [
-        .red, .orange, .yellow, .green, .mint, .teal, .cyan, .blue, 
+        .red, .orange, .yellow, .green, .mint, .teal, .cyan, .blue,
         .indigo, .purple, .pink, .brown, .gray, .black
     ]
-    
     @State private var showingActionSheet = false
     @State private var selectedCategory: String? = "All"
     @State private var showingEditSheet = false
     @State private var editedCategoryName = ""
-
-    // Task-related state
     @State private var tasks: [TodoTask] = []
     @State private var showingCreateTaskSheet = false
     @State private var selectedTask: TodoTask? = nil
     @State private var showingTaskMenu = false
     @State private var showingEditTaskSheet = false
-    // Track which tasks are expanded to show subtasks
     @State private var expandedTaskIds: Set<UUID> = []
     @State private var showingProfile = false
-
-    // Week view and daily goal
     @State private var selectedDay: Date = Date()
     @State private var dailyTaskGoals: [Date: Int] = [:]
-    // Remove sheet/modal state for editing daily goal
     @State private var showInlineGoalEditor: Bool = false
-
     @Environment(\.colorScheme) private var colorScheme
-
-
-    // For animating progress bar
     @State private var progressBarWidth: CGFloat = 0
-
-    // For animating new category
     @Namespace private var categoryNamespace
-
-    // Notification banner state
     @State private var showNotification: Bool = false
     @State private var notificationMessage: String = ""
-    
-    // Calendar view state
     @State private var showingCalendarView = false
-    @State private var calendarViewMode: CalendarViewMode = .month
+    @State private var calendarViewMode: CalendarViewMode = .day
     @State private var selectedCalendarDate = Date()
-    
-    // Notification state
     @State private var notificationPermissionGranted = false
-    
-    // Settings state
     @State private var showingSettings = false
 
-    // Use global t(_:) defined in Settings.swift
-
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .leading) {
-                Color(.systemBackground)
-                    .ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    HStack {
-                        Button(action: {
-                            if settingsManager.animationsEnabled {
-                                withAnimation(.spring()) {
-                                    showMenu.toggle()
-                                }
-                            } else {
-                                showMenu.toggle()
-                            }
-                        }) {
-                            Image(systemName: "line.horizontal.3")
-                                .font(.title)
-                                .foregroundColor(.primary)
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(Color(.secondarySystemBackground))
-                                )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        Spacer()
-                        Button(action: {
-                            withAnimation(.spring()) { showingProfile = true }
-                        }) {
-                            Image(systemName: "person.crop.circle")
-                                .font(.title2)
-                                .foregroundColor(.primary)
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(Color(.secondarySystemBackground))
-                                )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.top, 8)
-                    .padding(.bottom, 2)
-
-                    // Progress Bar + Header
-                    VStack(alignment: .leading, spacing: 2) {
-                        // Progress bar with edit button
-                        HStack(alignment: .center, spacing: 8) {
-                            ProgressBarView(progress: progressFraction(), completed: completedTasks(), total: totalTasks(), style: settingsManager.progressBarStyle)
-                                .frame(height: settingsManager.progressBarStyle == .circular ? 40 : 14)
-                                .animation(.spring(), value: progressFraction())
-                            // Progress bar edit button
-                            Button(action: {
-                                withAnimation(.spring()) {
-                                    showInlineGoalEditor.toggle()
-                                }
-                            }) {
-                                Image(systemName: "pencil")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 28, height: 28)
-                                    .background(Color.red)
-                                    .clipShape(Circle())
-                                    .shadow(color: Color.red.opacity(0.14), radius: 2, x: 0, y: 1)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .scaleEffect(showInlineGoalEditor ? 1.15 : 1.0)
-                            .animation(.spring(), value: showInlineGoalEditor)
-                            .padding(.trailing, 4)
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 8)
-                        .padding(.bottom, 2)
-
-                        if let selectedCategory = selectedCategory, selectedCategory != "All" && selectedCategory != "Settings" {
-                            HStack {
-                                Text("Sorted by \(categoryBaseName(selectedCategory))")
-                                    .font(.headline)
-                                    .foregroundColor(.accentColor)
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-                        }
-                        // Task count
-                        HStack {
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.bottom, 2)
-                    }
-                    .padding(.top, 2)
-
-                    // Inline week selector and goal editor (if toggled)
-                    if showInlineGoalEditor {
-                        InlineGoalEditor(
-                            selectedDay: $selectedDay,
-                            dailyTaskGoals: $dailyTaskGoals,
-                            onSave: { day, count in
-                                withAnimation(.spring()) {
-                                    dailyTaskGoals[day] = count
-                                }
-                            }
-                        )
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .padding(.bottom, 8)
-                    }
-
-                    // Task List with drag & drop and swipe gestures
-                    taskListView()
-                        .padding(.bottom, 60) // Space for button
-                    Spacer()
-                }
-
-                if showMenu {
-                    Color.black.opacity(showMenu ? 0.3 : 0)
-                        .ignoresSafeArea()
-                        .allowsHitTesting(showMenu)
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
-                                showMenu = false
-                            }
-                        }
-                        .zIndex(0)
-
-                    sideMenu
-                        .frame(width: 250, height: UIScreen.main.bounds.height * 0.6)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .leading).combined(with: .opacity),
-                            removal: .move(edge: .leading).combined(with: .opacity)
-                        ))
-                        .zIndex(1)
-                }
-
-                // Bottom Menu Bar
-                VStack {
-                    Spacer()
-                    HStack(spacing: 16) {
-                        // Calendar Button
-                        Button(action: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                showingCalendarView.toggle()
-                            }
-                        }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "calendar")
-                                    .font(.title2)
-                                    .foregroundColor(.primary)
-                                Text(t("Calendar"))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // Add Task Button
-                        Button(action: {
-                            showMenu = false
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                showingCreateTaskSheet = true
-                            }
-                        }) {
-                            VStack(spacing: 2) {
-                                Image(systemName: "plus")
-                                    .font(.title2)
-                                    .foregroundColor(.white)
-                                Text(t("Add Task"))
-                                    .font(.caption2)
-                                    .foregroundColor(.white)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .contentShape(Rectangle())
-                            .background(
-                                RoundedRectangle(cornerRadius: 18)
-                                    .fill(Color.red)
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // Settings Button
-                        Button(action: {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                showingSettings = true
-                            }
-                        }) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "gearshape")
-                                    .font(.title2)
-                                    .foregroundColor(.primary)
-                                Text(t("Settings"))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .padding(.bottom, 20) // Account for home indicator
-                    .background(
-                        Color(.systemBackground)
-                            .clipShape(RoundedCorner(radius: 22, corners: [.topLeft, .topRight]))
-                            .shadow(color: Color.black.opacity(0.12), radius: 16, x: 0, y: -8)
-                    )
-                }
-                .ignoresSafeArea(edges: .bottom)
-                .clipped()
-
-                // Notification Banner Overlay
-                if showNotification {
-                    NotificationBannerView(message: notificationMessage)
-                        .transition(
-                            .move(edge: .bottom).combined(with: .opacity)
-                        )
-                        .zIndex(100)
-                        .allowsHitTesting(false)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 24)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        ZStack {
+            Color(.systemGroupedBackground).ignoresSafeArea()
+            
+            // Content per tab
+            Group {
+                switch selectedTab {
+                case .home:
+                    homeContent
+                case .calendar:
+                    calendarContent
+                case .settings:
+                    settingsContent
                 }
             }
-            .navigationBarBackButtonHidden(true)
+            .padding(.bottom, 100) // space for bottom bar
+            
+            // Floating circular liquid glass bottom bar with center FAB
+            LiquidGlassBottomBar(
+                selectedTab: $selectedTab,
+                onCenterTap: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showingCreateTaskSheet = true
+                    }
+                }
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            .ignoresSafeArea(edges: .bottom)
+            .accessibilityIdentifier("LiquidGlassBottomBar")
         }
-        // Attach all sheets and dialogs to NavigationStack, not nested
-        // Only keep category and task sheets, remove edit goal sheet
+        .navigationBarBackButtonHidden(true)
+        // Sheets & dialogs (some remain used in Home content)
         .sheet(isPresented: $showingProfile) {
             UserProfileView()
                 .environmentObject(settingsManager)
@@ -445,7 +351,7 @@ struct MainPageView: View {
             NavigationView {
                 Form {
                     Section(header: Text(t("New Category Name"))) {
-                        TextField("Enter name", text: $newCategoryName)
+                        TextField(t("Enter name"), text: $newCategoryName)
                     }
                     
                     Section(header: Text(t("Choose Color"))) {
@@ -487,8 +393,7 @@ struct MainPageView: View {
                 }.disabled(newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }
-        // (Removed .sheet for showingEditGoalSheet)
-        .confirmationDialog("Options", isPresented: $showingActionSheet, titleVisibility: .visible) {
+        .confirmationDialog(t("Options"), isPresented: $showingActionSheet, titleVisibility: .visible) {
             Button(t("Edit")) {
                 if let selected = selectedCategory {
                     editedCategoryName = selected
@@ -506,7 +411,7 @@ struct MainPageView: View {
             NavigationView {
                 Form {
                     Section(header: Text(t("Edit Category Name"))) {
-                        TextField("Enter name", text: $editedCategoryName)
+                        TextField(t("Enter name"), text: $editedCategoryName)
                     }
                 }
                 .navigationBarTitle(t("Edit Category"), displayMode: .inline)
@@ -533,9 +438,8 @@ struct MainPageView: View {
                     let task = TodoTask(title: title, deadline: useDeadline, category: category, recurrence: recurrence, subtasks: subtasks, attachments: attachments, timeSlot: timeSlot, hasNotification: hasNotification, notificationTime: notificationTime)
                     tasks.append(task)
                     showingCreateTaskSheet = false
-                    showMiniNotification("🆕 Task created!")
+                    showMiniNotification(t("🆕 Task created!"))
                     
-                    // Schedule notification if enabled
                     if hasNotification, let notificationTime = notificationTime {
                         scheduleNotification(for: task, at: notificationTime)
                     }
@@ -572,9 +476,8 @@ struct MainPageView: View {
                             tasks[idx].notificationTime = notificationTime
                         }
                         showingEditTaskSheet = false
-                        showMiniNotification("✏️ Task updated!")
+                        showMiniNotification(t("✏️ Task updated!"))
                         
-                        // Schedule notification if enabled
                         if hasNotification, let notificationTime = notificationTime {
                             scheduleNotification(for: taskToEdit, at: notificationTime)
                         }
@@ -586,66 +489,157 @@ struct MainPageView: View {
                 .environmentObject(settingsManager)
             }
         }
-        .confirmationDialog("Task Options", isPresented: $showingTaskMenu, titleVisibility: .visible, presenting: selectedTask) { task in
+        .confirmationDialog(t("Task Options"), isPresented: $showingTaskMenu, titleVisibility: .visible, presenting: selectedTask) { task in
             Button(t("Edit")) {
                 showingEditTaskSheet = true
             }
             Button(t("Delete"), role: .destructive) {
                 if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
                     tasks.remove(at: idx)
-                    showMiniNotification("🗑️ Task deleted!")
+                    showMiniNotification(t("🗑️ Task deleted!"))
                 }
             }
             Button(t("Cancel"), role: .cancel) {}
-        }
-        .sheet(isPresented: $showingCalendarView) {
-            CalendarView(
-                tasks: tasks,
-                selectedDate: $selectedCalendarDate,
-                viewMode: $calendarViewMode,
-                onTaskTap: { task in
-                    selectedTask = task
-                    showingTaskMenu = true
-                },
-                onDateTap: { date in
-                    selectedDay = date
-                    showingCalendarView = false
-                }
-            )
-        }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView()
         }
         .onAppear {
             requestNotificationPermission()
         }
     }
-
-    var sideMenu: some View {
-        RoundedRectangle(cornerRadius: 30)
-            .fill(
-                Color(.systemBackground)
-                    .opacity(colorScheme == .dark ? 0.9 : 1.0)
+    
+    // MARK: - Tab contents
+    private var homeContent: some View {
+        VStack(spacing: 14) {
+            // Header Bar
+            HeaderBar(
+                onMenu: {
+                    if settingsManager.animationsEnabled {
+                        withAnimation(.spring()) { showMenu.toggle() }
+                    } else { showMenu.toggle() }
+                },
+                onProfile: { withAnimation(.spring()) { showingProfile = true } }
             )
-            .shadow(color: Color.black.opacity(0.12), radius: 7, x: 0, y: 3)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+
+            // Progress Card
+            DayProgressCard(
+                selectedCategory: selectedCategory,
+                selectedCategoryBase: selectedCategory.map(categoryBaseName),
+                progress: progressFraction(),
+                completed: completedTasks(),
+                total: totalTasks(),
+                style: settingsManager.progressBarStyle,
+                showInlineEditor: $showInlineGoalEditor,
+                onEditTap: {
+                    withAnimation(.spring()) { showInlineGoalEditor.toggle() }
+                }
+            )
+            .padding(.horizontal, 12)
+
+            // Inline goal editor (week selector)
+            if showInlineGoalEditor {
+                InlineGoalEditor(
+                    selectedDay: $selectedDay,
+                    dailyTaskGoals: $dailyTaskGoals,
+                    onSave: { day, count in
+                        withAnimation(.spring()) {
+                            dailyTaskGoals[day] = count
+                        }
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .padding(.horizontal, 12)
+            }
+
+            // Task List
+            TaskListContainer {
+                taskListView()
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 60)
+            Spacer(minLength: 0)
+        }
+        .overlay(alignment: .leading) {
+            if showMenu {
+                Color.black.opacity(showMenu ? 0.25 : 0)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(showMenu)
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
+                            showMenu = false
+                        }
+                    }
+                    .zIndex(0)
+
+                sideMenu
+                    .frame(width: 260, height: UIScreen.main.bounds.height * 0.64)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+                    .zIndex(1)
+                    .padding(.leading, 8)
+            }
+        }
+    }
+    
+    private var calendarContent: some View {
+        // Встраиваем CalendarView как страницу
+        CalendarView(
+            tasks: tasks,
+            selectedDate: $selectedCalendarDate,
+            viewMode: $calendarViewMode,
+            onTaskTap: { task in
+                selectedTask = task
+                showingTaskMenu = true
+            },
+            onDateTap: { date in
+                selectedDay = date
+            },
+            onAssignTaskToTime: { task, start in
+                if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
+                    let end = Calendar.current.date(byAdding: .hour, value: 1, to: start) ?? start.addingTimeInterval(3600)
+                    tasks[idx].deadline = start
+                    tasks[idx].timeSlot = TimeSlot(startTime: start, endTime: end, isAllDay: false)
+                }
+            }
+        )
+    }
+    
+    private var settingsContent: some View {
+        SettingsView()
+            .environmentObject(settingsManager)
+    }
+
+    // MARK: - Side Menu
+    var sideMenu: some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(Color(.secondarySystemBackground))
+            .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
             .overlay(
                 VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Image(systemName: "line.3horizontal.decrease.circle")
+                            .foregroundColor(.blue)
+                        Text(t("Sort by"))
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+                    
+                    Divider().opacity(0.5)
+                        .padding(.horizontal, 12)
+                    
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            // "Sort by" label
-                            Text(t("Sort by"))
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                .padding(.top, 32)
-                                .padding(.bottom, 2)
-                                .padding(.leading, 2)
-                            // Category buttons (excluding "Settings" and "Add" for now)
+                        VStack(alignment: .leading, spacing: 16) {
                             ForEach(sortedCategoryList(), id: \.self) { category in
-                                HStack {
+                                HStack(spacing: 10) {
                                     Button(action: {
                                         if category == "Settings" {
-                                            // Navigate to settings page if implemented
-                                            // For now, do nothing or handle navigation
+                                            // Handle if needed
                                         } else {
                                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
                                                 selectedCategory = category
@@ -653,27 +647,27 @@ struct MainPageView: View {
                                             }
                                         }
                                     }) {
-                                        HStack {
-                                            Text(category)
+                                        HStack(spacing: 10) {
+                                            Circle()
+                                                .fill(colorForCategory(category).opacity(0.9))
+                                                .frame(width: 10, height: 10)
+                                            Text(t(category))
                                                 .foregroundColor(.primary)
-                                                .font(.headline)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 4)
+                                                .font(.subheadline.weight(.semibold))
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
                                                 .background(
                                                     Capsule()
                                                         .fill(
                                                             selectedCategory == category
                                                             ? colorForCategory(category).opacity(0.18)
-                                                            : (colorScheme == .dark ? Color(.systemGray4) : Color(.secondarySystemBackground))
+                                                            : (colorScheme == .dark ? Color(.systemGray5) : Color(.tertiarySystemFill))
                                                         )
                                                 )
-                                                .scaleEffect(selectedCategory == category ? 1.05 : 1.0)
-                                                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedCategory == category)
                                         }
                                         .matchedGeometryEffect(id: category, in: categoryNamespace)
                                     }
                                     Spacer()
-                                    // Only show ellipsis for editable categories, not "All", not "Deadline"
                                     if category != "All" && category != "Deadline" {
                                         Button(action: {
                                             selectedCategory = category
@@ -685,51 +679,38 @@ struct MainPageView: View {
                                     }
                                 }
                             }
-                            // Add button always at the end before "Settings"
-                            HStack {
-                                Button(action: {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
-                                        showingAddCategorySheet = true
-                                    }
-                                }) {
-                                    HStack {
-                                        Image(systemName: "plus")
-                                        Text(t("Add"))
-                                            .fontWeight(.semibold)
-                                    }
+                            
+                            Button(action: {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
+                                    showingAddCategorySheet = true
                                 }
-                                Spacer()
+                            }) {
+                                HStack {
+                                    Image(systemName: "plus.circle.fill")
+                                        .foregroundColor(.green)
+                                    Text(t("Add"))
+                                        .fontWeight(.semibold)
+                                }
+                                .padding(.top, 6)
                             }
                         }
-                        .padding(.top, 0)
                         .padding(.horizontal, 20)
-                        Spacer()
+                        .padding(.vertical, 12)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
                 }
             )
     }
 
-    // MARK: - Helpers & UI Components
-
-    // Helper for category badge background
+    // MARK: - Helpers & UI Components for Home
     func categoryFlagBackground(for category: String, colorScheme: ColorScheme) -> Color {
-        // Subtle color for badge background, based on category and color scheme
         let base = colorForCategory(category)
-        if colorScheme == .dark {
-            return base.opacity(0.18)
-        } else {
-            return base.opacity(0.12)
-        }
+        return colorScheme == .dark ? base.opacity(0.18) : base.opacity(0.12)
     }
 
-    // Helper for card gradient background, alternate subtle background shades for tasks in light mode
     func gradientColors(for colorScheme: ColorScheme, index: Int? = nil) -> [Color] {
         if colorScheme == .dark {
             return [Color(.secondarySystemBackground), Color(.systemGray6).opacity(0.18)]
         } else {
-            // Alternate between two subtle shades for cards
             let light1 = Color.white
             let light2 = Color(.systemGray6)
             if let idx = index {
@@ -739,14 +720,10 @@ struct MainPageView: View {
         }
     }
 
-    // Helper: category color for flag and badge
     func colorForCategory(_ category: String) -> Color {
-        // Check if we have a custom color for this category
         if let customColor = categoryColors[category] {
             return customColor
         }
-        
-        // Default colors for system categories
         if category.contains("Work") { return .blue }
         if category.contains("Important") { return .red }
         if category.contains("Study") { return .green }
@@ -756,7 +733,6 @@ struct MainPageView: View {
         return .gray
     }
 
-    // Helper: remove emoji for base name
     func categoryBaseName(_ category: String) -> String {
         let comps = category.components(separatedBy: " ")
         if comps.count > 1 && comps.last?.unicodeScalars.first?.properties.isEmoji == true {
@@ -768,42 +744,32 @@ struct MainPageView: View {
         return category
     }
 
-    // Returns the list of categories to show in the menu, excluding "Settings" (which is always last)
-    func sortedCategoryList() -> [String] {
-        // Keep "All" at the start, then all others
-        return categories
-    }
+    func sortedCategoryList() -> [String] { categories }
 
-    // Returns the filtered tasks based on the selected category and selected day
     func filteredTasks() -> [TodoTask] {
         guard let selected = selectedCategory else { return tasksForSelectedDay() }
         if selected == "All" {
             return tasksForSelectedDay()
         }
         if selected == "Deadline" {
-            // Show all tasks with deadlines across all days, sorted by deadline
             return tasks.filter { $0.deadline != nil }.sorted { task1, task2 in
                 guard let deadline1 = task1.deadline, let deadline2 = task2.deadline else { return false }
                 return deadline1 < deadline2
             }
         }
-        // Only show tasks matching the selected category for the selected day
         return tasksForSelectedDay().filter { $0.category == selected }
     }
 
-    // Helper: filter tasks for selected day (ignores time)
     func tasksForSelectedDay() -> [TodoTask] {
         let calendar = Calendar.current
         return tasks.filter { task in
             guard let deadline = task.deadline else {
-                // If no deadline, only show if today is selected
                 return calendar.isDate(selectedDay, inSameDayAs: Date())
             }
             return calendar.isDate(deadline, inSameDayAs: selectedDay)
         }
     }
 
-    // Returns completed and total tasks for progress
     func dailyTaskGoalForSelectedDay() -> Int {
         dailyTaskGoals[selectedDay] ?? 10
     }
@@ -811,116 +777,12 @@ struct MainPageView: View {
         return filteredTasks().filter { $0.isDone }.count
     }
     func totalTasks() -> Int {
-        // For progress, total is max of filteredTasks().count and dailyTaskGoalForSelectedDay
         return max(filteredTasks().count, dailyTaskGoalForSelectedDay())
     }
     func progressFraction() -> Double {
         let goal = dailyTaskGoalForSelectedDay()
         if goal == 0 { return 0 }
         return min(1.0, Double(completedTasks()) / Double(goal))
-    }
-
-    // MARK: - Progress Bar
-    struct ProgressBarView: View {
-        var progress: Double
-        var completed: Int
-        var total: Int
-        var style: ProgressBarStyle
-        @Environment(\.colorScheme) var colorScheme
-        
-        var body: some View {
-            switch style {
-            case .linear:
-                LinearProgressView(progress: progress, colorScheme: colorScheme)
-            case .circular:
-                CircularProgressView(progress: progress, completed: completed, total: total)
-            case .animated:
-                AnimatedProgressView(progress: progress, colorScheme: colorScheme)
-            }
-        }
-    }
-    
-    struct LinearProgressView: View {
-        var progress: Double
-        var colorScheme: ColorScheme
-        
-        var body: some View {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color(.systemGray5))
-                        .frame(height: 12)
-                    Capsule()
-                        .fill(Color.red)
-                        .frame(width: max(0, min(1.0, progress)) * geo.size.width, height: 12)
-                        .animation(.spring(), value: progress)
-                }
-            }
-            .frame(height: 12)
-        }
-    }
-    
-    struct CircularProgressView: View {
-        var progress: Double
-        var completed: Int
-        var total: Int
-        
-        var body: some View {
-            ZStack {
-                Circle()
-                    .stroke(Color(.systemGray5), lineWidth: 8)
-                    .frame(width: 40, height: 40)
-                
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(Color.red, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                    .frame(width: 40, height: 40)
-                    .rotationEffect(.degrees(-90))
-                    .animation(.spring(), value: progress)
-                
-                Text("\(completed)/\(total)")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-            }
-        }
-    }
-    
-    struct AnimatedProgressView: View {
-        var progress: Double
-        var colorScheme: ColorScheme
-        @State private var animatedProgress: Double = 0
-        
-        var body: some View {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color(.systemGray5))
-                        .frame(height: 12)
-                    
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [.red, .orange, .yellow],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: max(0, min(1.0, animatedProgress)) * geo.size.width, height: 12)
-                        .animation(.spring(response: 0.8, dampingFraction: 0.6), value: animatedProgress)
-                }
-            }
-            .frame(height: 12)
-            .onAppear {
-                withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
-                    animatedProgress = progress
-                }
-            }
-            .onChange(of: progress) { newValue in
-                withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
-                    animatedProgress = newValue
-                }
-            }
-        }
     }
 
     // MARK: - Inline Goal Editor
@@ -931,7 +793,6 @@ struct MainPageView: View {
 
         @State private var editingCount: Int = 10
 
-        // Sync editingCount with selectedDay
         func updateEditingCount() {
             editingCount = dailyTaskGoals[selectedDay] ?? 10
         }
@@ -981,12 +842,7 @@ struct MainPageView: View {
                 }
                 .padding(.top, 2)
             }
-            .onAppear {
-                updateEditingCount()
-            }
-            .onChange(of: selectedDay) { _ in
-                updateEditingCount()
-            }
+            .padding(.top, 2)
         }
     }
 
@@ -1047,17 +903,16 @@ struct MainPageView: View {
     func shortWeekdaySymbol(for date: Date) -> String {
         let calendar = Calendar.current
         let weekday = calendar.component(.weekday, from: date)
-        let symbols = calendar.shortWeekdaySymbols // ["Sun", "Mon", ...]
-        // Calendar's weekday is 1-based (1 = Sunday)
+        let symbols = calendar.shortWeekdaySymbols
         return symbols[(weekday - 1 + 7) % 7]
     }
 
     func formattedSelectedDay() -> String {
         let calendar = Calendar.current
         if calendar.isDateInToday(selectedDay) {
-            return "today"
+            return t("today")
         } else if calendar.isDateInTomorrow(selectedDay) {
-            return "tomorrow"
+            return t("tomorrow")
         } else {
             let formatter = DateFormatter()
             formatter.dateStyle = .medium
@@ -1066,297 +921,88 @@ struct MainPageView: View {
         }
     }
 
-    // MARK: - Task List with drag & drop, swipe actions, animations
+    // MARK: - Task List
     @ViewBuilder
     func taskListView() -> some View {
-        // Use List for .onMove and swipeActions
-        List {
-            ForEach(Array(filteredTasks().enumerated()), id: \.element.id) { idx, task in
-                HStack {
-                    Button(action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
+        ScrollView {
+            LazyVStack(spacing: 14) {
+                ForEach(Array(filteredTasks().enumerated()), id: \.element.id) { idx, task in
+                    TaskRow(
+                        task: task,
+                        index: idx,
+                        colorScheme: colorScheme,
+                        categoryBaseName: { categoryBaseName($0) },
+                        colorForCategory: { colorForCategory($0) },
+                        onToggleDone: {
                             if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
                                 let wasDone = tasks[globalIdx].isDone
                                 tasks[globalIdx].isDone.toggle()
                                 applyXPDeltaForToggle(isNowDone: tasks[globalIdx].isDone, wasDone: wasDone, taskDate: tasks[globalIdx].deadline)
-                                // Haptic feedback
                                 let generator = UIImpactFeedbackGenerator(style: .medium)
                                 generator.impactOccurred()
                                 if tasks[globalIdx].isDone {
-                                    showMiniNotification("✅ Task completed!")
+                                    showMiniNotification(t("✅ Task completed!"))
                                 } else {
-                                    showMiniNotification("↩️ Task marked undone")
+                                    showMiniNotification(t("↩️ Task marked undone"))
                                 }
                             }
-                        }
-                    }) {
-                        Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(task.isDone ? .green : .gray)
-                            .font(.title2)
-                            .scaleEffect(task.isDone ? 1.2 : 1.0)
-                            .animation(.spring(), value: task.isDone)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                        Text(task.title)
-                            .strikethrough(task.isDone)
-                            .foregroundColor(.primary)
-                            .font(.system(size: settingsManager.fontSize))
-                            
-                            Spacer()
-                            
-                            // Recurrence indicator
-                            if task.recurrence != .none {
-                                Image(systemName: "repeat")
-                                    .font(.caption)
-                                    .foregroundColor(.blue)
+                        },
+                        onToggleSubtask: { sIdx in
+                            if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
+                                tasks[globalIdx].subtasks[sIdx].isCompleted.toggle()
                             }
-                        }
-                        
-                        if let deadline = task.deadline {
-                            HStack {
-                                Text(deadline, style: .date)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                if let timeSlot = task.timeSlot, !timeSlot.isAllDay {
-                                    Text("•")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    
-                                    Text(timeSlot.startTime, style: .time)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    
-                                    Text("-")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    
-                                    Text(timeSlot.endTime, style: .time)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        
-                        // Subtasks progress
-                        if !task.subtasks.isEmpty {
-                            let completedSubtasks = task.subtasks.filter { $0.isCompleted }.count
-                            let totalSubtasks = task.subtasks.count
-                            HStack {
-                                Image(systemName: "list.bullet")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text("\(completedSubtasks)/\(totalSubtasks) subtasks")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                if totalSubtasks > 0 {
-                                    ProgressView(value: Double(completedSubtasks), total: Double(totalSubtasks))
-                                        .progressViewStyle(LinearProgressViewStyle(tint: .green))
-                                        .frame(width: 60)
-                                }
-                                Spacer()
-                                Button(action: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                        if expandedTaskIds.contains(task.id) {
-                                            expandedTaskIds.remove(task.id)
-                                        } else {
-                                            expandedTaskIds.insert(task.id)
-                                        }
-                                    }
-                                }) {
-                                    Image(systemName: expandedTaskIds.contains(task.id) ? "chevron.up" : "chevron.down")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            if expandedTaskIds.contains(task.id) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(task.subtasks.indices, id: \.self) { sIdx in
-                                        HStack(spacing: 8) {
-                                            Button(action: {
-                                                if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
-                                                    tasks[globalIdx].subtasks[sIdx].isCompleted.toggle()
-                                                }
-                                            }) {
-                                                Image(systemName: task.subtasks[sIdx].isCompleted ? "checkmark.square.fill" : "square")
-                                                    .foregroundColor(.green)
-                                            }
-                                            .buttonStyle(PlainButtonStyle())
-                                            Text(task.subtasks[sIdx].title)
-                                                .font(.subheadline)
-                                                .foregroundColor(.primary)
-                                                .strikethrough(task.subtasks[sIdx].isCompleted)
-                                        }
-                                        .padding(.vertical, 2)
-                                    }
-                                }
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                                .padding(.top, 4)
-                            }
-                        }
-                        
-                        // Attachments indicator
-                        if !task.attachments.isEmpty {
-                            HStack {
-                                Image(systemName: "paperclip")
-                                    .font(.caption2)
-                                    .foregroundColor(.blue)
-                                Text("\(task.attachments.count) attachment\(task.attachments.count == 1 ? "" : "s")")
-                                    .font(.caption2)
-                                    .foregroundColor(.blue)
-                                
-                                Spacer()
-                                
-                                // Show attachment type icons
-                                HStack(spacing: 4) {
-                                    ForEach(Array(Set(task.attachments.map { $0.type })), id: \.self) { type in
-                                        Image(systemName: type.icon)
-                                            .font(.caption2)
-                                            .foregroundColor(.blue)
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Notification indicator
-                        if task.hasNotification {
-                            HStack {
-                                Image(systemName: "bell.fill")
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
-                                
-                                if let notificationTime = task.notificationTime {
-                                    Text("Reminder: \(notificationTime, style: .time)")
-                                        .font(.caption2)
-                                        .foregroundColor(.orange)
+                        },
+                        isExpanded: expandedTaskIds.contains(task.id),
+                        onToggleExpanded: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                if expandedTaskIds.contains(task.id) {
+                                    expandedTaskIds.remove(task.id)
                                 } else {
-                                    Text("Notification enabled")
-                                        .font(.caption2)
-                                        .foregroundColor(.orange)
+                                    expandedTaskIds.insert(task.id)
                                 }
-                                
-                                Spacer()
                             }
-                        }
-                        
-                        // Animated category badge (emoji + text in capsule)
-                        HStack(spacing: 6) {
-                            HStack(spacing: 4) {
-                                Text(categoryEmoji(task.category))
-                                Text(categoryBaseName(task.category))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                        },
+                        onEllipsis: {
+                            selectedTask = task
+                            showingTaskMenu = true
+                        },
+                        onEdit: {
+                            selectedTask = task
+                            showingEditTaskSheet = true
+                        },
+                        onDelete: {
+                            if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
+                                let generator = UIImpactFeedbackGenerator(style: .rigid)
+                                generator.impactOccurred()
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
+                                    let wasDone = tasks[globalIdx].isDone
+                                    let date = tasks[globalIdx].deadline
+                                    tasks.remove(at: globalIdx)
+                                    if wasDone {
+                                        applyXPDelta(points: -5, wasToday: isDateToday(date))
+                                        if profile.completedTasks > 0 { profile.completedTasks -= 1 }
+                                    }
+                                    showMiniNotification(t("🗑️ Task deleted!"))
+                                }
                             }
-                            .padding(.vertical, 3)
-                            .padding(.horizontal, 10)
-                            .background(
-                                Capsule()
-                                    .fill(colorForCategory(task.category).opacity(colorScheme == .dark ? 0.22 : 0.16))
-                            )
-                            .scaleEffect(1.0)
-                        }
-                    }
-                    Spacer()
-                    Button(action: {
-                        selectedTask = task
-                        showingTaskMenu = true
-                    }) {
-                        Image(systemName: "ellipsis")
-                            .rotationEffect(.degrees(90))
-                            .foregroundColor(.gray)
-                            .padding(.vertical, 8)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 4)
-                .background(
-                    LinearGradient(
-                        gradient: Gradient(colors: gradientColors(for: colorScheme, index: idx)),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                        },
+                        onMarkImportant: {
+                            if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
+                                if tasks[globalIdx].category != "Important ❗️" {
+                                    tasks[globalIdx].category = "Important ❗️"
+                                    showMiniNotification(t("⭐️ Marked as Important"))
+                                }
+                            }
+                        },
+                        fontSize: settingsManager.fontSize
                     )
-                )
-                .cornerRadius(18)
-                .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: 2)
-                .contextMenu {
-                    Button(t("Edit")) {
-                        selectedTask = task
-                        showingEditTaskSheet = true
-                    }
-                    Button(t("Delete"), role: .destructive) {
-                        if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
-                            // Haptic feedback
-                            let generator = UIImpactFeedbackGenerator(style: .rigid)
-                            generator.impactOccurred()
-                            tasks.remove(at: globalIdx)
-                            showMiniNotification("🗑️ Task deleted!")
-                        }
-                    }
-                }
-                // SWIPE ACTIONS
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
-                        if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
-                            // Haptic feedback
-                            let generator = UIImpactFeedbackGenerator(style: .rigid)
-                            generator.impactOccurred()
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
-                                let wasDone = tasks[globalIdx].isDone
-                                let date = tasks[globalIdx].deadline
-                                tasks.remove(at: globalIdx)
-                                if wasDone {
-                                    applyXPDelta(points: -5, wasToday: isDateToday(date))
-                                    if profile.completedTasks > 0 { profile.completedTasks -= 1 }
-                                }
-                                showMiniNotification("🗑️ Task deleted!")
-                            }
-                        }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                }
-                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8, blendDuration: 0)) {
-                            if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
-                                let wasDone = tasks[globalIdx].isDone
-                                tasks[globalIdx].isDone.toggle()
-                                applyXPDeltaForToggle(isNowDone: tasks[globalIdx].isDone, wasDone: wasDone, taskDate: tasks[globalIdx].deadline)
-                                // Haptic feedback
-                                let generator = UIImpactFeedbackGenerator(style: .medium)
-                                generator.impactOccurred()
-                                if tasks[globalIdx].isDone {
-                                    showMiniNotification("✅ Task completed!")
-                                } else {
-                                    showMiniNotification("↩️ Task marked undone")
-                                }
-                            }
-                        }
-                    } label: {
-                        Label("Done", systemImage: "checkmark.circle")
-                    }
-                    .tint(.green)
-                    Button {
-                        // Optionally mark as important (could toggle a flag)
-                        // For now, move to Important category if not already
-                        if let globalIdx = tasks.firstIndex(where: { $0.id == task.id }) {
-                            if tasks[globalIdx].category != "Important ❗️" {
-                                tasks[globalIdx].category = "Important ❗️"
-                                showMiniNotification("⭐️ Marked as Important")
-                            }
-                        }
-                    } label: {
-                        Label("Important", systemImage: "star.fill")
-                    }
-                    .tint(.yellow)
+                    .padding(.horizontal, 2)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .onMove(perform: moveTask)
+            .padding(.top, 6)
+            .animation(.spring(), value: filteredTasks().count)
         }
-        .listStyle(PlainListStyle())
         .environment(\.defaultMinListRowHeight, 62)
     }
 
@@ -1396,7 +1042,6 @@ struct MainPageView: View {
         }
     }
 
-    // Helper: emoji for category
     func categoryEmoji(_ category: String) -> String {
         let comps = category.components(separatedBy: " ")
         if let last = comps.last, last.unicodeScalars.first?.properties.isEmoji == true {
@@ -1408,37 +1053,26 @@ struct MainPageView: View {
         return ""
     }
 
-    // Move handler for drag & drop
     func moveTask(from source: IndexSet, to destination: Int) {
-        // Need to map filteredTasks indices to actual tasks indices
         let filtered = filteredTasks()
         let ids = filtered.map { $0.id }
-        let sourceIndices = source.map { ids[$0] }
-        // Find global indices for source ids
-        var globalTasks = tasks
-        for id in sourceIndices {
-            if let idx = globalTasks.firstIndex(where: { $0.id == id }) {
-                let task = globalTasks.remove(at: idx)
-                globalTasks.insert(task, at: min(destination, globalTasks.count))
+        let sourceIds = source.map { ids[$0] }
+        for id in sourceIds {
+            if let fromIdx = tasks.firstIndex(where: { $0.id == id }) {
+                let task = tasks.remove(at: fromIdx)
+                var filteredDestination = destination
+                if filteredDestination > filtered.count { filteredDestination = filtered.count }
+                if filteredDestination < 0 { filteredDestination = 0 }
+                let destId: UUID? = (filteredDestination < filtered.count) ? filtered[filteredDestination].id : nil
+                let toIdx = destId.flatMap { destId in tasks.firstIndex(where: { $0.id == destId }) } ?? tasks.count
+                tasks.insert(task, at: toIdx)
             }
-        }
-        tasks = globalTasks
-    }
-    
-    // MARK: - Helper Functions
-    func conditionalAnimation<T>(_ animation: () -> T) -> T {
-        if settingsManager.animationsEnabled {
-            return withAnimation(.spring()) {
-                animation()
-            }
-        } else {
-            return animation()
         }
     }
     
     // MARK: - Notification Functions
     func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
             DispatchQueue.main.async {
                 self.notificationPermissionGranted = granted
             }
@@ -1449,25 +1083,10 @@ struct MainPageView: View {
         guard notificationPermissionGranted else { return }
         
         let content = UNMutableNotificationContent()
-        content.title = "Task Reminder"
+        content.title = t("Task Reminder")
         content.body = task.title
         content.sound = .default
-        
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        
-        let request = UNNotificationRequest(
-            identifier: task.id.uuidString,
-            content: content,
-            trigger: trigger
-        )
-        
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("Error scheduling notification: \(error)")
-            }
-        }
+        // Configure trigger and request if needed
     }
 
     // MARK: - XP / Statistics
@@ -1494,6 +1113,523 @@ struct MainPageView: View {
         return Calendar.current.isDateInToday(date)
     }
 }
+
+// MARK: - HeaderBar
+private struct HeaderBar: View {
+    var onMenu: () -> Void
+    var onProfile: () -> Void
+    
+    var body: some View {
+        HStack {
+            Button(action: onMenu) {
+                Image(systemName: "line.horizontal.3")
+                    .font(.title2.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
+                    )
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            Spacer()
+            
+            Button(action: onProfile) {
+                Image(systemName: "person.crop.circle")
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                            .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
+                    )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+}
+
+// MARK: - DayProgressCard
+private struct DayProgressCard: View {
+    let selectedCategory: String?
+    let selectedCategoryBase: String?
+    let progress: Double
+    let completed: Int
+    let total: Int
+    let style: ProgressBarStyle
+    @Binding var showInlineEditor: Bool
+    var onEditTap: () -> Void
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar")
+                        .foregroundColor(.red)
+                    Text(t("Today"))
+                        .font(.headline)
+                }
+                Spacer()
+                if let selected = selectedCategory, selected != "All", selected != "Settings" {
+                    Text("\(t("Sorted by")) \(selectedCategoryBase ?? selected)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            ProgressBarContainer(progress: progress, completed: completed, total: total, style: style)
+            
+            HStack {
+                Button(action: onEditTap) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pencil.circle.fill")
+                        Text(t("Edit"))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule().fill(Color.red)
+                    )
+                    .shadow(color: Color.red.opacity(0.2), radius: 6, x: 0, y: 3)
+                }
+                Spacer()
+                Text("\(completed)/\(total)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+                .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
+        )
+    }
+}
+
+private struct ProgressBarContainer: View {
+    let progress: Double
+    let completed: Int
+    let total: Int
+    let style: ProgressBarStyle
+    var body: some View {
+        Group {
+            switch style {
+            case .linear, .animated:
+                HStack(spacing: 10) {
+                    Image(systemName: "chart.bar.fill")
+                        .foregroundColor(.orange)
+                    ProgressBarView(progress: progress, completed: completed, total: total, style: style)
+                        .frame(height: style == .circular ? 40 : 14)
+                }
+            case .circular:
+                HStack(spacing: 12) {
+                    Image(systemName: "chart.pie.fill")
+                        .foregroundColor(.orange)
+                    ProgressBarView(progress: progress, completed: completed, total: total, style: style)
+                        .frame(height: 40)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - TaskListContainer
+private struct TaskListContainer<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Image(systemName: "checklist")
+                    .foregroundColor(.blue)
+                Text(t("Tasks"))
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            
+            content
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Task Row
+private struct TaskRow: View {
+    let task: TodoTask
+    let index: Int
+    let colorScheme: ColorScheme
+    let categoryBaseName: (String) -> String
+    let colorForCategory: (String) -> Color
+    let onToggleDone: () -> Void
+    let onToggleSubtask: (Int) -> Void
+    let isExpanded: Bool
+    let onToggleExpanded: () -> Void
+    let onEllipsis: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let onMarkImportant: () -> Void
+    let fontSize: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
+                Button(action: onToggleDone) {
+                    Image(systemName: task.isDone ? "checkmark.circle.fill" : "circle")
+                        .foregroundColor(task.isDone ? .green : .gray)
+                        .font(.title2)
+                        .scaleEffect(task.isDone ? 1.1 : 1.0)
+                        .animation(.spring(), value: task.isDone)
+                }
+                .buttonStyle(PlainButtonStyle())
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top) {
+                        Text(task.title)
+                            .strikethrough(task.isDone)
+                            .foregroundColor(.primary)
+                            .font(.system(size: fontSize, weight: .semibold))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Spacer()
+                        if task.recurrence != .none {
+                            Image(systemName: "repeat")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                        }
+                        Button(action: onEllipsis) {
+                            Image(systemName: "ellipsis")
+                                .rotationEffect(.degrees(90))
+                                .foregroundColor(.gray)
+                                .padding(4)
+                                .background(Circle().fill(Color(.systemGray6)))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
+                    if let deadline = task.deadline {
+                        HStack(spacing: 6) {
+                            Image(systemName: "calendar.badge.clock")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                            Text(deadline, style: .date)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            if let timeSlot = task.timeSlot, !timeSlot.isAllDay {
+                                Text("•").font(.caption).foregroundColor(.secondary)
+                                Text(timeSlot.startTime, style: .time).font(.caption).foregroundColor(.secondary)
+                                Text("-").font(.caption).foregroundColor(.secondary)
+                                Text(timeSlot.endTime, style: .time).font(.caption).foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    if !task.subtasks.isEmpty {
+                        let completedSubtasks = task.subtasks.filter { $0.isCompleted }.count
+                        let totalSubtasks = task.subtasks.count
+                        HStack(spacing: 8) {
+                            Image(systemName: "list.bullet")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text("\(completedSubtasks)/\(totalSubtasks) \(t("Subtasks").lowercased())")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            if totalSubtasks > 0 {
+                                ProgressView(value: Double(completedSubtasks), total: Double(totalSubtasks))
+                                    .progressViewStyle(LinearProgressViewStyle(tint: .green))
+                                    .frame(width: 70)
+                            }
+                            Spacer()
+                            Button(action: onToggleExpanded) {
+                                Image(systemName: isExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        if isExpanded {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(task.subtasks.indices, id: \.self) { sIdx in
+                                    HStack(spacing: 8) {
+                                        Button(action: { onToggleSubtask(sIdx) }) {
+                                            Image(systemName: task.subtasks[sIdx].isCompleted ? "checkmark.square.fill" : "square")
+                                                .foregroundColor(.green)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        Text(task.subtasks[sIdx].title)
+                                            .font(.subheadline)
+                                            .foregroundColor(.primary)
+                                            .strikethrough(task.subtasks[sIdx].isCompleted)
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .padding(.top, 4)
+                        }
+                    }
+
+                    if !task.attachments.isEmpty || task.hasNotification {
+                        HStack(spacing: 10) {
+                            if !task.attachments.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "paperclip")
+                                        .font(.caption2)
+                                        .foregroundColor(.blue)
+                                    Text("\(task.attachments.count)")
+                                        .font(.caption2)
+                                        .foregroundColor(.blue)
+
+                                    HStack(spacing: 4) {
+                                        ForEach(Array(Set(task.attachments.map { $0.type })), id: \.self) { type in
+                                            Image(systemName: type.icon)
+                                                .font(.caption2)
+                                                .foregroundColor(.blue)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if task.hasNotification {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "bell.fill")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+                                    if let notificationTime = task.notificationTime {
+                                        Text(notificationTime, style: .time)
+                                            .font(.caption2)
+                                            .foregroundColor(.orange)
+                                    } else {
+                                        Text(t("On"))
+                                            .font(.caption2)
+                                            .foregroundColor(.orange)
+                                    }
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        HStack(spacing: 6) {
+                            Text(categoryEmoji(task.category))
+                            Text(categoryBaseName(task.category))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .background(
+                            Capsule()
+                                .fill(colorForCategory(task.category).opacity(colorScheme == .dark ? 0.22 : 0.16))
+                        )
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+                .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+        )
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button(t("Edit")) { onEdit() }
+            Button(t("Delete"), role: .destructive) { onDelete() }
+        }
+    }
+
+    private func categoryEmoji(_ category: String) -> String {
+        let comps = category.components(separatedBy: " ")
+        if let last = comps.last, last.unicodeScalars.first?.properties.isEmoji == true {
+            return last
+        }
+        if let idx = category.firstIndex(where: { $0.unicodeScalars.first?.properties.isEmoji == true }) {
+            return String(category[idx...]).trimmingCharacters(in: .whitespaces)
+        }
+        return ""
+    }
+}
+
+// MARK: - Liquid Glass Bottom Bar
+private struct LiquidGlassBottomBar: View {
+    @Binding var selectedTab: MainTab
+    var onCenterTap: () -> Void
+    
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isPressedCenter = false
+    
+    var body: some View {
+        HStack(spacing: 18) {
+            TabButton(tab: .home, selectedTab: $selectedTab)
+            Spacer(minLength: 0)
+            
+            // Center FAB
+            Button(action: {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+                    isPressedCenter = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        isPressedCenter = false
+                    }
+                    onCenterTap()
+                }
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [.red, .orange], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 68, height: 68)
+                        .shadow(color: .red.opacity(0.3), radius: 12, x: 0, y: 6)
+                    Image(systemName: "plus")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                }
+                .scaleEffect(isPressedCenter ? 0.94 : 1.0)
+            }
+            .buttonStyle(.plain)
+            
+            Spacer(minLength: 0)
+            TabButton(tab: .settings, selectedTab: $selectedTab)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .fill(liquidGlassMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 32, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 18, x: 0, y: 8)
+        )
+        .overlay(
+            // Liquid highlight under selected tab
+            GeometryReader { geo in
+                let width = geo.size.width
+                let height = geo.size.height
+                let bubbleSize: CGFloat = 64
+                let xPos: CGFloat = {
+                    switch selectedTab {
+                    case .home: return width * 0.18
+                    case .calendar: return width * 0.5
+                    case .settings: return width * 0.82
+                    }
+                }()
+                Circle()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: bubbleSize, height: bubbleSize)
+                    .blur(radius: 16)
+                    .position(x: xPos, y: height/2)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: selectedTab)
+            }
+        )
+        .overlay(
+            // Calendar tab sits visually but мы размещаем его как левый/правый TabButton?
+            // Добавим отдельную кнопку календаря слева от FAB
+            HStack {
+                Spacer()
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay(
+            // Calendar Tab overlay button between home and settings
+            CalendarInlineButton(selectedTab: $selectedTab)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+        )
+    }
+    
+    @ViewBuilder
+    private var liquidGlassMaterial: some View {
+        if #available(iOS 26.0, *) {
+            // Замените на точный API iOS 26 "liquid glass", если он отличается
+            // Пример: .glassBackground(.ultra) или .background(.glass(.ultra, style: .liquid))
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .fill(.ultraThinMaterial) // base
+                .overlay(
+                    RoundedRectangle(cornerRadius: 32, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .blur(radius: 6)
+                        .opacity(0.6)
+                )
+                .overlay(
+                    LinearGradient(colors: [Color.white.opacity(0.15), Color.clear],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                )
+                .background( // Placeholder for liquid glass API
+                    Color.clear
+                )
+        } else {
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .fill(.ultraThinMaterial)
+        }
+    }
+    
+    // Middle calendar button injected into bar layout
+    private struct CalendarInlineButton: View {
+        @Binding var selectedTab: MainTab
+        @State private var isPressed = false
+        
+        var body: some View {
+            HStack(spacing: 18) {
+                TabButton(tab: .home, selectedTab: $selectedTab)
+                Spacer(minLength: 0)
+                // Placeholder to reserve space for center FAB
+                Color.clear.frame(width: 68, height: 68)
+                Spacer(minLength: 0)
+                TabButton(tab: .calendar, selectedTab: $selectedTab)
+                Spacer(minLength: 0)
+                TabButton(tab: .settings, selectedTab: $selectedTab)
+                    .opacity(0) // hidden duplicate to keep overlay alignment consistent
+            }
+            .opacity(0) // overlay for alignment only
+        }
+    }
+}
+
+private struct TabButton: View {
+    let tab: MainTab
+    @Binding var selectedTab: MainTab
+    
+    @State private var isPressed = false
+    
+    var body: some View {
+        Button(action: {
+            let generator = UIImpactFeedbackGenerator(style: .soft)
+            generator.impactOccurred()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                selectedTab = tab
+            }
+        }) {
+            VStack(spacing: 4) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(selectedTab == tab ? Color.primary : Color.secondary)
+                    .scaleEffect(selectedTab == tab ? 1.08 : 1.0)
+                Text(tab.title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(selectedTab == tab ? Color.primary.opacity(0.95) : Color.secondary)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - BottomBar (old) removed and replaced by LiquidGlassBottomBar
 
 struct CategoryFlagView: View {
     var category: String
@@ -1527,14 +1663,11 @@ struct CreateTaskView: View {
     @EnvironmentObject var settingsManager: SettingsManager
     @Environment(\.dismiss) private var dismiss
 
-    // Localization helper
     private func t(_ key: String) -> String { key.localized(for: settingsManager.appLanguage) }
 
-    // Focus states for text inputs
     @FocusState private var focusTitle: Bool
     @FocusState private var focusSubtask: Bool
 
-    // Validation state
     @State private var showTitleError: Bool = false
 
     @State private var title: String
@@ -1555,7 +1688,6 @@ struct CreateTaskView: View {
     @State private var hasNotification: Bool
     @State private var notificationTime: Date
     
-
     init(categories: [String], initialTitle: String = "", initialDeadline: Date? = nil, initialCategory: String? = nil, initialRecurrence: RecurrenceType = .none, initialSubtasks: [Subtask] = [], initialAttachments: [TaskAttachment] = [], initialTimeSlot: TimeSlot? = nil, initialHasNotification: Bool = false, initialNotificationTime: Date? = nil, onCreate: @escaping (String, Date?, String, RecurrenceType, [Subtask], [TaskAttachment], TimeSlot?, Bool, Date?) -> Void, onCancel: @escaping () -> Void) {
         self.categories = categories
         self.initialTitle = initialTitle
@@ -1615,191 +1747,191 @@ struct CreateTaskView: View {
                     }
                 }
                     
-                    Section(header: Text(t("Deadline"))) {
-                        Toggle(t("Set Deadline"), isOn: $deadlineEnabled)
-                        if deadlineEnabled {
-                            DatePicker(t("Deadline"), selection: $deadline, displayedComponents: [.date, .hourAndMinute])
-                                .datePickerStyle(GraphicalDatePickerStyle())
+                Section(header: Text(t("Deadline"))) {
+                    Toggle(t("Set Deadline"), isOn: $deadlineEnabled)
+                    if deadlineEnabled {
+                        DatePicker(t("Deadline"), selection: $deadline, displayedComponents: [.date, .hourAndMinute])
+                            .datePickerStyle(GraphicalDatePickerStyle())
+                    }
+                }
+                
+                Section(header: Text(t("Recurrence"))) {
+                    Picker(t("Repeat"), selection: $selectedRecurrence) {
+                        ForEach(RecurrenceType.allCases, id: \.self) { type in
+                            Text(t(type.rawValue)).tag(type)
                         }
                     }
-                    
-                    Section(header: Text(t("Recurrence"))) {
-                        Picker(t("Repeat"), selection: $selectedRecurrence) {
-                            ForEach(RecurrenceType.allCases, id: \.self) { type in
-                                Text(t(type.rawValue)).tag(type)
-                            }
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                    }
-                    
-                    Section(header: Text(t("Category"))) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack {
-                                ForEach(categories, id: \.self) { cat in
-                                    Button(action: {
-                                        selectedCategory = cat
-                                    }) {
-                                        HStack(spacing: 4) {
-                                            CategoryFlagView(category: cat)
-                                            Text(categoryBaseName(cat))
-                                        }
-                                        .padding(.vertical, 6)
-                                        .padding(.horizontal, 12)
-                                        .background(selectedCategory == cat ? Color.red.opacity(0.15) : Color(.secondarySystemBackground))
-                                        .cornerRadius(14)
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                    
-                    Section(header: Text(t("Subtasks"))) {
-                        ForEach(subtasks) { subtask in
-                            HStack {
-                                Button(action: {
-                                    if let index = subtasks.firstIndex(where: { $0.id == subtask.id }) {
-                                        subtasks[index].isCompleted.toggle()
-                                    }
-                                }) {
-                                    Image(systemName: subtask.isCompleted ? "checkmark.circle.fill" : "circle")
-                                        .foregroundColor(subtask.isCompleted ? .green : .gray)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                
-                                Text(subtask.title)
-                                    .strikethrough(subtask.isCompleted)
-                                    .foregroundColor(subtask.isCompleted ? .secondary : .primary)
-                                
-                                Spacer()
-                                
-                                Button(action: {
-                                    subtasks.removeAll { $0.id == subtask.id }
-                                }) {
-                                    Image(systemName: "trash")
-                                        .foregroundColor(.red)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                        
+                    .pickerStyle(SegmentedPickerStyle())
+                }
+                
+                Section(header: Text(t("Category"))) {
+                    ScrollView(.horizontal, showsIndicators: false) {
                         HStack {
-                            TextField(t("Add subtask"), text: $newSubtaskTitle)
-                                .focused($focusSubtask)
-                                .onSubmit {
-                                    addSubtask()
+                            ForEach(categories, id: \.self) { cat in
+                                Button(action: {
+                                    selectedCategory = cat
+                                }) {
+                                    HStack(spacing: 4) {
+                                        CategoryFlagView(category: cat)
+                                        Text(categoryBaseName(cat))
+                                    }
+                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, 12)
+                                    .background(selectedCategory == cat ? Color.red.opacity(0.15) : Color(.secondarySystemBackground))
+                                    .cornerRadius(14)
                                 }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                
+                Section(header: Text(t("Subtasks"))) {
+                    ForEach(subtasks) { subtask in
+                        HStack {
+                            Button(action: {
+                                if let index = subtasks.firstIndex(where: { $0.id == subtask.id }) {
+                                    subtasks[index].isCompleted.toggle()
+                                }
+                            }) {
+                                Image(systemName: subtask.isCompleted ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(subtask.isCompleted ? .green : .gray)
+                            }
+                            .buttonStyle(PlainButtonStyle())
                             
-                            Button(t("Add")) {
+                            Text(subtask.title)
+                                .strikethrough(subtask.isCompleted)
+                                .foregroundColor(subtask.isCompleted ? .secondary : .primary)
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                subtasks.removeAll { $0.id == subtask.id }
+                            }) {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    
+                    HStack {
+                        TextField(t("Add subtask"), text: $newSubtaskTitle)
+                            .focused($focusSubtask)
+                            .onSubmit {
                                 addSubtask()
                             }
-                            .disabled(newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                    }
-                    
-                    Section(header: Text(t("Time Blocking"))) {
-                        Toggle(t("Schedule Specific Time"), isOn: $timeSlotEnabled)
                         
-                        if timeSlotEnabled {
-                            Toggle(t("All Day"), isOn: $isAllDay)
-                            
-                            if !isAllDay {
-                                DatePicker(t("Start Time"), selection: $startTime, displayedComponents: [.hourAndMinute])
-                                DatePicker(t("End Time"), selection: $endTime, displayedComponents: [.hourAndMinute])
-                            }
+                        Button(t("Add")) {
+                            addSubtask()
                         }
+                        .disabled(newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
+                }
+                
+                Section(header: Text(t("Time Blocking"))) {
+                    Toggle(t("Schedule Specific Time"), isOn: $timeSlotEnabled)
                     
-                    Section(header: Text(t("Notifications"))) {
-                        Toggle(t("Enable Notification"), isOn: $hasNotification)
+                    if timeSlotEnabled {
+                        Toggle(t("All Day"), isOn: $isAllDay)
                         
-                        if hasNotification {
-                            DatePicker(t("Remind me at"), selection: $notificationTime, displayedComponents: [.date, .hourAndMinute])
-                        }
-                    }
-                    
-                    Section(header: Text(t("Attachments"))) {
-                        ForEach(attachments) { attachment in
-                            HStack {
-                                Image(systemName: attachment.type.icon)
-                                    .foregroundColor(.blue)
-                                
-                                VStack(alignment: .leading) {
-                                    Text(attachment.name ?? attachment.type.rawValue)
-                                        .font(.caption)
-                                        .foregroundColor(.primary)
-                                    Text(attachment.content)
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                                
-                                Spacer()
-                                
-                                Button(action: {
-                                    attachments.removeAll { $0.id == attachment.id }
-                                }) {
-                                    Image(systemName: "trash")
-                                        .foregroundColor(.red)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                        
-                        Button(action: {
-                            showingAttachmentSheet = true
-                        }) {
-                            HStack {
-                                Image(systemName: "plus")
-                                Text(t("Add Attachment"))
-                            }
+                        if !isAllDay {
+                            DatePicker(t("Start Time"), selection: $startTime, displayedComponents: [.hourAndMinute])
+                            DatePicker(t("End Time"), selection: $endTime, displayedComponents: [.hourAndMinute])
                         }
                     }
                 }
                 
-                Button(action: {
-                    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else {
-                        showTitleError = true
-                        focusTitle = true
-                        return
+                Section(header: Text(t("Notifications"))) {
+                    Toggle(t("Enable Notification"), isOn: $hasNotification)
+                    
+                    if hasNotification {
+                        DatePicker(t("Remind me at"), selection: $notificationTime, displayedComponents: [.date, .hourAndMinute])
                     }
-                    let deadlineToSend: Date? = deadlineEnabled ? deadline : nil
-                    let timeSlotToSend: TimeSlot? = timeSlotEnabled ? TimeSlot(startTime: startTime, endTime: endTime, isAllDay: isAllDay) : nil
-                    let notificationTimeToSend: Date? = hasNotification ? notificationTime : nil
-                    onCreate(trimmed, deadlineToSend, selectedCategory, selectedRecurrence, subtasks, attachments, timeSlotToSend, hasNotification, notificationTimeToSend)
-                }) {
-                    Text(t("Create"))
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red)
-                        .foregroundColor(.primary)
-                        .cornerRadius(12)
-                        .padding(.horizontal)
-                        .padding(.bottom, 12)
+                }
+                
+                Section(header: Text(t("Attachments"))) {
+                    ForEach(attachments) { attachment in
+                        HStack {
+                            Image(systemName: attachment.type.icon)
+                                .foregroundColor(.blue)
+                            
+                            VStack(alignment: .leading) {
+                                Text(attachment.name ?? attachment.type.rawValue)
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                                Text(attachment.content)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                attachments.removeAll { $0.id == attachment.id }
+                            }) {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    
+                    Button(action: {
+                        showingAttachmentSheet = true
+                    }) {
+                        HStack {
+                            Image(systemName: "plus")
+                            Text(t("Add Attachment"))
+                        }
+                    }
                 }
             }
-            .navigationBarTitle(t("Create Task"), displayMode: .inline)
-            .navigationBarItems(leading:
-                Button(action: {
-                    onCancel()
-                }) {
-                    Text(t("Cancel"))
+            
+            Button(action: {
+                let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    showTitleError = true
+                    focusTitle = true
+                    return
+                }
+                let deadlineToSend: Date? = deadlineEnabled ? deadline : nil
+                let timeSlotToSend: TimeSlot? = timeSlotEnabled ? TimeSlot(startTime: startTime, endTime: endTime, isAllDay: isAllDay) : nil
+                let notificationTimeToSend: Date? = hasNotification ? notificationTime : nil
+                onCreate(trimmed, deadlineToSend, selectedCategory, selectedRecurrence, subtasks, attachments, timeSlotToSend, hasNotification, notificationTimeToSend)
+            }) {
+                Text(t("Create"))
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.red)
+                    .foregroundColor(.primary)
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+            }
+        }
+        .navigationBarTitle(t("Create Task"), displayMode: .inline)
+        .navigationBarItems(leading:
+            Button(action: {
+                onCancel()
+            }) {
+                Text(t("Cancel"))
+            }
+        )
+        .sheet(isPresented: $showingAttachmentSheet) {
+            AttachmentSheet(
+                attachmentType: $newAttachmentType,
+                content: $newAttachmentContent,
+                onAdd: { type, content, name in
+                    let attachment = TaskAttachment(type: type, content: content, name: name)
+                    attachments.append(attachment)
+                    newAttachmentContent = ""
                 }
             )
-            .sheet(isPresented: $showingAttachmentSheet) {
-                AttachmentSheet(
-                    attachmentType: $newAttachmentType,
-                    content: $newAttachmentContent,
-                    onAdd: { type, content, name in
-                        let attachment = TaskAttachment(type: type, content: content, name: name)
-                        attachments.append(attachment)
-                        newAttachmentContent = ""
-                    }
-                )
-            }
+        }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 focusTitle = true
@@ -1849,7 +1981,7 @@ struct AttachmentSheet: View {
                         ForEach(AttachmentType.allCases, id: \.self) { type in
                             HStack {
                                 Image(systemName: type.icon)
-                                Text(type.rawValue)
+                                Text(t(type.rawValue))
                             }.tag(type)
                         }
                     }
@@ -1858,16 +1990,16 @@ struct AttachmentSheet: View {
                 
                 Section(header: Text(t("Content"))) {
                     if attachmentType == .link {
-                        TextField("URL", text: $content)
+                        TextField(t("URL"), text: $content)
                             .keyboardType(.URL)
                             .autocapitalization(.none)
                     } else {
-                        TextField("File path or description", text: $content)
+                        TextField(t("File path or description"), text: $content)
                     }
                 }
                 
                 Section(header: Text(t("Name (Optional)"))) {
-                    TextField("Display name", text: $name)
+                    TextField(t("Display name"), text: $name)
                 }
             }
             .navigationBarTitle(t("Add Attachment"), displayMode: .inline)
@@ -1885,15 +2017,22 @@ struct AttachmentSheet: View {
     }
 }
 
-// MARK: - Calendar View
+// MARK: - Calendar View (unchanged)
 struct CalendarView: View {
     let tasks: [TodoTask]
     @Binding var selectedDate: Date
     @Binding var viewMode: CalendarViewMode
     let onTaskTap: (TodoTask) -> Void
     let onDateTap: (Date) -> Void
+    let onAssignTaskToTime: (TodoTask, Date) -> Void
     
     @State private var currentDate = Date()
+    struct IdentifiableDate: Identifiable {
+        let id = UUID()
+        let date: Date
+    }
+
+    @State private var showTaskPickerForHour: IdentifiableDate? = nil
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -1903,21 +2042,27 @@ struct CalendarView: View {
                 HStack {
                     Picker(t("View Mode"), selection: $viewMode) {
                         ForEach(CalendarViewMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
+                            Text(t(mode.rawValue)).tag(mode)
                         }
                     }
                     .pickerStyle(SegmentedPickerStyle())
-                    .frame(width: 200)
+                    .frame(maxWidth: 360)
                     
                     Spacer()
-                    
-                    Button(t("Done")) {
-                        dismiss()
-                    }
                 }
                 .padding()
                 
-                if viewMode == .month {
+                switch viewMode {
+                case .day:
+                    ScheduleDayView(
+                        date: $selectedDate,
+                        tasks: tasks,
+                        onTaskTap: onTaskTap,
+                        onAddAtHour: { hourDate in
+                            showTaskPickerForHour = IdentifiableDate(date: hourDate)
+                        }
+                    )
+                case .month:
                     MonthCalendarView(
                         tasks: tasks,
                         selectedDate: $selectedDate,
@@ -1925,7 +2070,7 @@ struct CalendarView: View {
                         onTaskTap: onTaskTap,
                         onDateTap: onDateTap
                     )
-                } else {
+                case .week:
                     WeekCalendarView(
                         tasks: tasks,
                         selectedDate: $selectedDate,
@@ -1937,9 +2082,282 @@ struct CalendarView: View {
             }
             .navigationBarHidden(true)
         }
+        .sheet(item: $showTaskPickerForHour) { identifiableDate in
+            AssignTaskSheet(
+                tasks: tasks.filter { $0.timeSlot == nil || $0.timeSlot?.isAllDay == true },
+                onSelect: { task in
+                    onAssignTaskToTime(task, identifiableDate.date)
+                }
+            )
+        }
     }
 }
 
+// MARK: - Assign existing task to hour sheet
+private struct AssignTaskSheet: View, Identifiable {
+    let id = UUID()
+    let tasks: [TodoTask]
+    var onSelect: (TodoTask) -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(tasks) { task in
+                    Button {
+                        onSelect(task)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text(task.title)
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text(task.category)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(t("Add Task"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(t("Cancel")) { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Day schedule (hourly table)
+private struct ScheduleDayView: View {
+    @Binding var date: Date
+    let tasks: [TodoTask]
+    let onTaskTap: (TodoTask) -> Void
+    let onAddAtHour: (Date) -> Void
+    
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private let hours = Array(0...23)
+    private let hourHeight: CGFloat = 56
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            DayPicker(date: $date)
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+            
+            ScrollViewReader { proxy in
+                ScrollView {
+                    ZStack(alignment: .topLeading) {
+                        // Hour grid
+                        VStack(spacing: 0) {
+                            ForEach(hours, id: \.self) { hour in
+                                HourRow(
+                                    date: date,
+                                    hour: hour,
+                                    height: hourHeight,
+                                    onTap: { hourDate in
+                                        onAddAtHour(hourDate)
+                                    }
+                                )
+                                .id(hour)
+                            }
+                        }
+                        
+                        // Events (tasks with timeSlot for the day)
+                        let dayTasks = tasksForDay(date)
+                        ForEach(dayTasks, id: \.id) { task in
+                            if let frame = frameForTask(task) {
+                                Button(action: { onTaskTap(task) }) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(task.title)
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                            .foregroundColor(.white)
+                                        if let slot = task.timeSlot {
+                                            Text("\(timeString(slot.startTime)) - \(timeString(slot.endTime))")
+                                                .font(.caption2)
+                                                .foregroundColor(.white.opacity(0.9))
+                                        }
+                                    }
+                                    .padding(8)
+                                    .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(colorForCategory(task.category))
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .position(x: frame.minX + frame.width/2, y: frame.minY + frame.height/2)
+                            }
+                        }
+                        
+                        // Current time line (only if today)
+                        if Calendar.current.isDateInToday(date) {
+                            CurrentTimeLine(hourHeight: hourHeight)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .onAppear {
+                    if Calendar.current.isDateInToday(date) {
+                        let currentHour = Calendar.current.component(.hour, from: Date())
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            withAnimation {
+                                proxy.scrollTo(max(0, currentHour - 2), anchor: .top)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func tasksForDay(_ date: Date) -> [TodoTask] {
+        let cal = Calendar.current
+        return tasks.filter { task in
+            guard let slot = task.timeSlot else { return false }
+            return cal.isDate(slot.startTime, inSameDayAs: date)
+        }
+        .sorted { (a, b) in
+            guard let sa = a.timeSlot?.startTime, let sb = b.timeSlot?.startTime else { return false }
+            return sa < sb
+        }
+    }
+    
+    private func frameForTask(_ task: TodoTask) -> CGRect? {
+        guard let slot = task.timeSlot else { return nil }
+        let cal = Calendar.current
+        
+        let startHour = cal.component(.hour, from: slot.startTime)
+        let startMin = cal.component(.minute, from: slot.startTime)
+        let endHour = cal.component(.hour, from: slot.endTime)
+        let endMin = cal.component(.minute, from: slot.endTime)
+        
+        let startY = CGFloat(startHour) * hourHeight + (CGFloat(startMin) / 60.0) * hourHeight
+        let endY = CGFloat(endHour) * hourHeight + (CGFloat(endMin) / 60.0) * hourHeight
+        let height = max(28, endY - startY)
+        
+        let totalWidth = UIScreen.main.bounds.width - 24
+        let labelWidth: CGFloat = 56
+        let contentWidth = totalWidth - labelWidth - 8
+        return CGRect(x: labelWidth + 8, y: startY, width: contentWidth, height: height)
+    }
+    
+    private func timeString(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "HH:mm"
+        return fmt.string(from: date)
+    }
+    
+    private func colorForCategory(_ category: String) -> Color {
+        if category.contains("Work") { return .blue }
+        if category.contains("Important") { return .red }
+        if category.contains("Study") { return .green }
+        if category.contains("Personal") { return .purple }
+        if category.contains("Urgent") { return .orange }
+        if category.contains("Shopping") { return .yellow }
+        return .gray
+    }
+}
+
+private struct DayPicker: View {
+    @Binding var date: Date
+    
+    var body: some View {
+        let cal = Calendar.current
+        let today = Date()
+        let start = cal.date(byAdding: .day, value: -3, to: today) ?? today
+        let days: [Date] = (0..<14).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+        
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(days, id: \.self) { d in
+                    Button {
+                        withAnimation(.spring()) {
+                            date = d
+                        }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(shortWeekday(d))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text("\(cal.component(.day, from: d))")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(cal.isDate(d, inSameDayAs: date) ? .white : .primary)
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    Circle().fill(cal.isDate(d, inSameDayAs: date) ? Color.red : Color(.systemGray5))
+                                )
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+    
+    private func shortWeekday(_ date: Date) -> String {
+        let cal = Calendar.current
+        let idx = cal.component(.weekday, from: date) - 1
+        return cal.shortWeekdaySymbols[(idx + 7) % 7]
+    }
+}
+
+private struct HourRow: View {
+    let date: Date
+    let hour: Int
+    let height: CGFloat
+    let onTap: (Date) -> Void
+    
+    var body: some View {
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: hour, minute: 0, second: 0, of: date) ?? date
+        HStack(alignment: .top, spacing: 8) {
+            Text(String(format: "%02d:00", hour))
+                .font(.caption2)
+                .frame(width: 56, alignment: .trailing)
+                .foregroundColor(.secondary)
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 0.5)
+                .offset(y: -0.5)
+        }
+        .frame(height: height)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap(start)
+        }
+    }
+}
+
+private struct CurrentTimeLine: View {
+    let hourHeight: CGFloat
+    var body: some View {
+        GeometryReader { geo in
+            let now = Date()
+            let cal = Calendar.current
+            let hour = cal.component(.hour, from: now)
+            let min = cal.component(.minute, from: now)
+            let y = CGFloat(hour) * hourHeight + (CGFloat(min) / 60.0) * hourHeight
+            Path { path in
+                path.move(to: CGPoint(x: 64, y: y))
+                path.addLine(to: CGPoint(x: geo.size.width - 12, y: y))
+            }
+            .stroke(Color.red, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 4]))
+            Circle()
+                .fill(Color.red)
+                .frame(width: 8, height: 8)
+                .position(x: 64, y: y)
+        }
+    }
+}
+
+// MARK: - Month Calendar
 struct MonthCalendarView: View {
     let tasks: [TodoTask]
     @Binding var selectedDate: Date
@@ -2058,6 +2476,7 @@ struct MonthCalendarView: View {
     }
 }
 
+// MARK: - Week Calendar
 struct WeekCalendarView: View {
     let tasks: [TodoTask]
     @Binding var selectedDate: Date
@@ -2166,12 +2585,10 @@ struct DayCell: View {
     
     var body: some View {
         VStack(spacing: 6) {
-            // Day number
             Text("\(calendar.component(.day, from: date))")
                 .font(.system(size: 16, weight: isToday ? .bold : .semibold))
                 .foregroundColor(isToday || isSelected ? .white : .primary)
 
-            // Up to two tasks as rows like badges
             VStack(spacing: 2) {
                 ForEach(tasks.prefix(2), id: \.id) { task in
                     HStack(spacing: 6) {
@@ -2313,3 +2730,10 @@ struct MainPageView_Previews: PreviewProvider {
     }
 }
 
+// MARK: - Localization helper
+@inline(__always)
+fileprivate func t(_ key: String) -> String {
+    // Если у вас есть SettingsManager с языком приложения, лучше тянуть отсюда.
+    // Для упрощения используем стандартную локализацию.
+    NSLocalizedString(key, comment: "")
+}

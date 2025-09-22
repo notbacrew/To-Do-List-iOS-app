@@ -2,7 +2,7 @@
 //  AccountRepository.swift
 //  FirstProject
 //
-//  CRUD для AccountEntity
+//  CRUD для AccountEntity (через CoreDataManager)
 //
 
 import Foundation
@@ -19,7 +19,8 @@ struct AccountDTO {
 final class AccountRepository {
     private let context: NSManagedObjectContext
 
-    init(context: NSManagedObjectContext = PersistenceController.shared.container.viewContext) {
+    // Переведено на CoreDataManager, чтобы в проекте был один стек Core Data
+    init(context: NSManagedObjectContext = CoreDataManager.shared.context) {
         self.context = context
     }
 
@@ -115,4 +116,3 @@ final class AccountRepository {
         try context.save()
     }
 }
-

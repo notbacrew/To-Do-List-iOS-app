@@ -11,11 +11,14 @@ import SwiftUI
 struct FirstProjectApp: App {
     @StateObject private var settingsManager = SettingsManager.shared
     @StateObject private var userProfile = UserProfile()
+
     var body: some Scene {
         WindowGroup {
             RootContainerView()
                 .environmentObject(settingsManager)
                 .environmentObject(userProfile)
+                // Пробрасываем единый Core Data контекст из CoreDataManager
+                .environment(\.managedObjectContext, CoreDataManager.shared.context)
         }
     }
 }

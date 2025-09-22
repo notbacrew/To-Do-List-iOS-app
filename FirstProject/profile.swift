@@ -1,63 +1,171 @@
-//
-//  profile.swift
-//  FirstProject
-//
-//  Created by maksimchernukha on 11.09.2025.
-//
-
 import SwiftUI
 import PhotosUI
 import Combine
 import AuthenticationServices
-
+import CoreData
 
 final class UserProfile: ObservableObject {
     private let ud = UserDefaults.standard
-    private let keyUsername = "user.username"
-    private let keyTotalXP = "user.totalXP"
-    private let keyCompletedTasks = "user.completedTasks"
-    private let keyCompletedToday = "user.completedToday"
-    private let keyAvatarData = "user.avatarData"
-    
-    private var cancellables = Set<AnyCancellable>()
+    private let keyCurrentUserID = "user.currentUserID"
 
+    private var cancellables = Set<AnyCancellable>()
+    // Заменяем репозиторий на AccountManager с явными ошибками
+    private let accountManager = AccountManager()
+
+    @Published var isLoggedIn: Bool
+    @Published var email: String?
     @Published var username: String
     @Published var avatar: UIImage?
     @Published var totalXP: Int
     @Published var completedTasks: Int
     @Published var completedToday: Int
 
+    // Текущий идентификатор пользователя (кэшируем для удобства)
+    private var currentUserID: UUID? {
+        didSet {
+            // При смене пользователя обновляем подписки на сохранение и подгружаем его данные
+            configurePersistenceBindings()
+        }
+    }
+
+    // MARK: - Авторизация/регистрация (через Core Data, с ошибками)
+    @discardableResult
+    func login(email: String, password: String) -> Bool {
+        switch loginByEmail(email: email, password: password) {
+        case .success:
+            return true
+        case .failure:
+            return false
+        }
+    }
+
+    func loginByEmail(email: String, password: String) -> Result<Void, AccountError> {
+        do {
+            let account = try accountManager.authenticateByEmail(email: email, password: password)
+            self.email = account.email
+            self.username = account.username ?? "User"
+            self.isLoggedIn = true
+
+            let id = try ensureAccountID(account)
+            self.currentUserID = id
+            ud.set(id.uuidString, forKey: keyCurrentUserID)
+
+            // Подгружаем персональные данные пользователя
+            loadPerUserData(for: id)
+
+            return .success(())
+        } catch let err as AccountError {
+            return .failure(err)
+        } catch {
+            return .failure(.unknown)
+        }
+    }
+
+    // Вариант входа по username
+    func login(username: String, password: String) -> Result<Void, AccountError> {
+        do {
+            let account = try accountManager.authenticateByUsername(username: username, password: password)
+            self.email = account.email
+            self.username = account.username ?? "User"
+            self.isLoggedIn = true
+
+            let id = try ensureAccountID(account)
+            self.currentUserID = id
+            ud.set(id.uuidString, forKey: keyCurrentUserID)
+
+            loadPerUserData(for: id)
+
+            return .success(())
+        } catch let err as AccountError {
+            return .failure(err)
+        } catch {
+            return .failure(.unknown)
+        }
+    }
+
+    // Регистрация всегда создаёт НОВЫЙ аккаунт (если email свободен).
+    func register(email: String, password: String) -> Result<Void, AccountError> {
+        let baseName = email // можешь заменить на вводимое имя
+        do {
+            let account = try accountManager.addAccount(username: baseName, email: email, password: password)
+            self.email = account.email
+            self.username = account.username ?? "User"
+            self.isLoggedIn = true
+
+            let id = try ensureAccountID(account)
+            self.currentUserID = id
+            ud.set(id.uuidString, forKey: keyCurrentUserID)
+
+            // Новый аккаунт — стартуем с дефолтной статистики (0) и пустого аватара,
+            // но если уже были какие-то данные под этим id (маловероятно) — загрузим их.
+            loadPerUserData(for: id, useDefaultsIfMissing: true)
+
+            return .success(())
+        } catch let err as AccountError {
+            return .failure(err)
+        } catch {
+            return .failure(.unknown)
+        }
+    }
+
+    func logout() {
+        self.isLoggedIn = false
+        ud.removeObject(forKey: keyCurrentUserID)
+        self.currentUserID = nil
+
+        // Сбрасываем сессионные данные в модели (UI увидит "чистое" состояние)
+        self.email = nil
+        self.username = "User"
+        self.avatar = nil
+        self.totalXP = 0
+        self.completedTasks = 0
+        self.completedToday = 0
+    }
+
+    // MARK: - Инициализация
     init() {
-        self.username = ud.string(forKey: keyUsername) ?? "User"
-        self.totalXP = ud.integer(forKey: keyTotalXP)
-        self.completedTasks = ud.integer(forKey: keyCompletedTasks)
-        self.completedToday = ud.integer(forKey: keyCompletedToday)
-        if let data = ud.data(forKey: keyAvatarData) { self.avatar = UIImage(data: data) } else { self.avatar = nil }
+        // Базовые дефолты, пока не восстановим пользователя
+        self.isLoggedIn = false
+        self.email = nil
+        self.username = "User"
+        self.totalXP = 0
+        self.completedTasks = 0
+        self.completedToday = 0
+        self.avatar = nil
 
-        // Persist on changes
-        // Note: using didSet with self now safe; all properties initialized
-        $username
-            .sink { [weak self] newValue in
-                self?.ud.set(newValue, forKey: self?.keyUsername ?? "user.username")
-            }
-            .store(in: &cancellables)
-        $totalXP
-            .sink { [weak self] v in
-                self?.ud.set(v, forKey: self?.keyTotalXP ?? "user.totalXP")
-            }
-            .store(in: &cancellables)
-        $completedTasks
-            .sink { [weak self] v in
-                self?.ud.set(v, forKey: self?.keyCompletedTasks ?? "user.completedTasks")
-            }
-            .store(in: &cancellables)
-        $completedToday
-            .sink { [weak self] v in
-                self?.ud.set(v, forKey: self?.keyCompletedToday ?? "user.completedToday")
-            }
-            .store(in: &cancellables)
+        // Восстанавливаем текущего пользователя по сохранённому UUID
+        if let idString = ud.string(forKey: keyCurrentUserID), let uuid = UUID(uuidString: idString) {
+            do {
+                let ctx = CoreDataManager.shared.context
+                let req: NSFetchRequest<AccountEntity> = AccountEntity.fetchRequest()
+                req.fetchLimit = 1
+                req.predicate = NSPredicate(format: "id == %@", uuid as CVarArg)
+                if let entity = try ctx.fetch(req).first {
+                    self.isLoggedIn = true
+                    self.email = entity.email
+                    self.username = entity.username ?? "User"
+                    self.currentUserID = uuid
 
-        // Reset statistics listener (do not change totalXP)
+                    // Подгружаем пер-пользовательские данные
+                    loadPerUserData(for: uuid)
+                } else {
+                    // Не нашли пользователя — чистим состояние
+                    self.isLoggedIn = false
+                    self.email = nil
+                    self.username = "User"
+                    self.currentUserID = nil
+                }
+            } catch {
+                self.isLoggedIn = false
+                self.email = nil
+                self.username = "User"
+                self.currentUserID = nil
+            }
+        }
+
+        // Настраиваем подписки на сохранение (привязанные к текущему пользователю)
+        configurePersistenceBindings()
+
         NotificationCenter.default.addObserver(forName: .resetStatisticsRequested, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.completedTasks = 0
@@ -65,13 +173,21 @@ final class UserProfile: ObservableObject {
         }
     }
 
-    // Call to persist avatar when changed
+    // MARK: - Аватар
     func persistAvatar() {
-        if let data = avatar?.pngData() { ud.set(data, forKey: keyAvatarData) } else { ud.removeObject(forKey: keyAvatarData) }
+        guard let userID = currentUserID else {
+            // Нет текущего пользователя — не сохраняем в глобальные ключи
+            return
+        }
+        let key = Self.keyAvatarData(for: userID)
+        if let data = avatar?.pngData() {
+            ud.set(data, forKey: key)
+        } else {
+            ud.removeObject(forKey: key)
+        }
     }
 
-    // MARK: - Leveling
-    // Level 1 is the starting level. To reach level 2 you need 20 XP, then +10 more than previous level each next level.
+    // MARK: - Leveling (без изменений)
     var level: Int {
         var currentLevel = 1
         var remainingXP = totalXP
@@ -85,10 +201,8 @@ final class UserProfile: ObservableObject {
     }
 
     var xpForNextLevel: Int {
-        // XP required to go from current "level" to the next one
         let baseForLevel2 = 20
         let increment = 10
-        // Compute requirement for the next threshold given current totalXP progression
         var threshold = baseForLevel2
         var accumulated = 0
         while accumulated + threshold <= totalXP {
@@ -99,7 +213,6 @@ final class UserProfile: ObservableObject {
     }
 
     var currentLevelProgressXP: Int {
-        // XP already accumulated within the current level segment
         var threshold = 20
         var accumulated = 0
         while accumulated + threshold <= totalXP {
@@ -114,153 +227,97 @@ final class UserProfile: ObservableObject {
         if req <= 0 { return 0 }
         return min(1.0, Double(currentLevelProgressXP) / req)
     }
-}
 
-struct UserProfileView: View {
-    @EnvironmentObject var settingsManager: SettingsManager
-    @EnvironmentObject var profile: UserProfile
-
-    @State private var isEditingName: Bool = false
-    @State private var photosPickerItem: PhotosPickerItem?
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                headerSection
-                levelSection
-                statsSection
-            }
-            .padding(16)
-        }
-        .navigationTitle("Profile")
-        .onChange(of: photosPickerItem) { _ in loadAvatar() }
+    // MARK: - Helpers
+    private func ensureAccountID(_ account: AccountEntity) throws -> UUID {
+        if let id = account.id { return id }
+        // Если по какой-то причине id пуст — создадим и сохраним
+        let newID = UUID()
+        account.id = newID
+        try CoreDataManager.shared.context.save()
+        return newID
     }
 
-    // MARK: - Sections
-    var headerSection: some View {
-        VStack(spacing: 12) {
-            PhotosPicker(selection: $photosPickerItem, matching: .images, photoLibrary: .shared()) {
-                ZStack {
-                    if let image = profile.avatar {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        VStack(spacing: 6) {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 36, weight: .semibold))
-                            Text("Add photo")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(.secondarySystemBackground))
+    // Генерация пер-пользовательских ключей
+    private static func keyTotalXP(for id: UUID) -> String { "user.\(id.uuidString).totalXP" }
+    private static func keyCompletedTasks(for id: UUID) -> String { "user.\(id.uuidString).completedTasks" }
+    private static func keyCompletedToday(for id: UUID) -> String { "user.\(id.uuidString).completedToday" }
+    private static func keyAvatarData(for id: UUID) -> String { "user.\(id.uuidString).avatarData" }
+
+    // Загрузка данных конкретного пользователя
+    private func loadPerUserData(for id: UUID, useDefaultsIfMissing: Bool = false) {
+        let totalXPKey = Self.keyTotalXP(for: id)
+        let completedTasksKey = Self.keyCompletedTasks(for: id)
+        let completedTodayKey = Self.keyCompletedToday(for: id)
+        let avatarKey = Self.keyAvatarData(for: id)
+
+        if useDefaultsIfMissing {
+            self.totalXP = ud.object(forKey: totalXPKey) as? Int ?? 0
+            self.completedTasks = ud.object(forKey: completedTasksKey) as? Int ?? 0
+            self.completedToday = ud.object(forKey: completedTodayKey) as? Int ?? 0
+        } else {
+            // Тоже самое, но разделено для ясности
+            self.totalXP = ud.integer(forKey: totalXPKey)
+            self.completedTasks = ud.integer(forKey: completedTasksKey)
+            self.completedToday = ud.integer(forKey: completedTodayKey)
+        }
+
+        if let data = ud.data(forKey: avatarKey) {
+            self.avatar = UIImage(data: data)
+        } else {
+            self.avatar = nil
+        }
+    }
+
+    // Подписки на сохранение значений — привязаны к текущему пользователю
+    private func configurePersistenceBindings() {
+        // Сбрасываем старые подписки
+        cancellables.removeAll()
+
+        // Обновление username в Core Data (как и было)
+        $username
+            .sink { [weak self] newValue in
+                guard let self = self else { return }
+                guard self.isLoggedIn,
+                      let id = self.currentUserID else { return }
+                do {
+                    let ctx = CoreDataManager.shared.context
+                    let req: NSFetchRequest<AccountEntity> = AccountEntity.fetchRequest()
+                    req.fetchLimit = 1
+                    req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+                    if let entity = try ctx.fetch(req).first {
+                        entity.username = newValue
+                        try ctx.save()
                     }
-                }
-                .frame(width: 96, height: 96)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                .shadow(radius: 4, x: 0, y: 2) // explicit x to avoid label ambiguity
-            }
-
-            if isEditingName {
-                TextField("Enter name", text: $profile.username)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.title3.weight(.semibold))
-            } else {
-                Button(action: { withAnimation(.spring()) { isEditingName = true } }) {
-                    Text(profile.username)
-                        .font(.title2.weight(.bold))
+                } catch {
+                    print("Update username error: \(error)")
                 }
             }
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
-    }
+            .store(in: &cancellables)
 
-    var levelSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Level \(profile.level)")
-                    .font(.headline)
-                Spacer()
-                Text("\(profile.currentLevelProgressXP) / \(profile.xpForNextLevel) XP")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+        // Если нет текущего пользователя — не сохраняем статистику в UD
+        guard let userID = currentUserID else { return }
+
+        $totalXP
+            .sink { [weak self] v in
+                guard let self = self else { return }
+                self.ud.set(v, forKey: Self.keyTotalXP(for: userID))
             }
-            ProgressView(value: profile.progressToNextLevel)
-                .progressViewStyle(.linear)
-                .tint(.red)
-            Text(t("Complete tasks: +5 XP each"))
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
-    }
+            .store(in: &cancellables)
 
-    var statsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(t("Statistics"))
-                .font(.headline)
-            HStack(spacing: 12) {
-                statCard(title: t("Completed"), value: "\(profile.completedTasks)")
-                statCard(title: t("Today"), value: "\(profile.completedToday)")
-                statCard(title: t("XP"), value: "\(profile.totalXP)")
+        $completedTasks
+            .sink { [weak self] v in
+                guard let self = self else { return }
+                self.ud.set(v, forKey: Self.keyCompletedTasks(for: userID))
             }
-        }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
-    }
+            .store(in: &cancellables)
 
-    func statCard(title: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.title3.weight(.bold))
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(.tertiarySystemBackground)))
-    }
-
-    // MARK: - Avatar loading
-    private func presentPhotoPicker() {}
-
-    private func loadAvatar() {
-        guard let item = photosPickerItem else { return }
-        _Concurrency.Task {
-            if let data = try? await item.loadTransferable(type: Data.self),
-               let image = UIImage(data: data) {
-                await MainActor.run {
-                    profile.avatar = image
-                    profile.persistAvatar()
-                }
+        $completedToday
+            .sink { [weak self] v in
+                guard let self = self else { return }
+                self.ud.set(v, forKey: Self.keyCompletedToday(for: userID))
             }
-            await MainActor.run { photosPickerItem = nil }
-        }
-    }
-
-    // MARK: - Apple Sign In
-    private func signInWithApple() {
-        let request = ASAuthorizationAppleIDProvider().createRequest()
-        request.requestedScopes = [.fullName, .email]
-
-        let controller = ASAuthorizationController(authorizationRequests: [request])
-        controller.performRequests()
+            .store(in: &cancellables)
     }
 }
 
-struct UserProfileView_Previews: PreviewProvider {
-    static var previews: some View {
-        let settings = SettingsManager.shared
-        let profile = UserProfile()
-        return NavigationView { UserProfileView().environmentObject(settings).environmentObject(profile) }
-            .preferredColorScheme(.dark)
-    }
-}
