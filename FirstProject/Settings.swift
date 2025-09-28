@@ -819,14 +819,6 @@ struct SettingsView: View {
             }
             .navigationTitle(t("Settings"))
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(t("Done")) {
-                        settingsManager.saveSettings()
-                        dismiss()
-                    }
-                }
-            }
         }
         .id(settingsManager.appLanguage)
         .sheet(isPresented: $showingCategoryEditor) {

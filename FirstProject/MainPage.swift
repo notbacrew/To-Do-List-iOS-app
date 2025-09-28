@@ -324,19 +324,22 @@ struct MainPageView: View {
                     settingsContent
                 }
             }
-            .padding(.bottom, 100) // space for bottom bar
+            .padding(.bottom, 70) // space for bottom bar
             
-            // Floating circular liquid glass bottom bar with center FAB
-            LiquidGlassBottomBar(
-                selectedTab: $selectedTab,
-                onCenterTap: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        showingCreateTaskSheet = true
+            // Bottom bar fixed at the bottom of the screen
+            VStack {
+                Spacer()
+                LiquidGlassBottomBar(
+                    selectedTab: $selectedTab,
+                    onCenterTap: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showingCreateTaskSheet = true
+                        }
                     }
-                }
-            )
-            .padding(.horizontal, 20)
-            .padding(.bottom, 20)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
             .ignoresSafeArea(edges: .bottom)
             .accessibilityIdentifier("LiquidGlassBottomBar")
         }
@@ -1504,8 +1507,7 @@ private struct LiquidGlassBottomBar: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .background(
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(liquidGlassMaterial)
+            liquidGlassMaterial
                 .overlay(
                     RoundedRectangle(cornerRadius: 32, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
@@ -2730,10 +2732,3 @@ struct MainPageView_Previews: PreviewProvider {
     }
 }
 
-// MARK: - Localization helper
-@inline(__always)
-fileprivate func t(_ key: String) -> String {
-    // Если у вас есть SettingsManager с языком приложения, лучше тянуть отсюда.
-    // Для упрощения используем стандартную локализацию.
-    NSLocalizedString(key, comment: "")
-}
